@@ -1,6 +1,6 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import ResultsTable from '@/components/ResultsTable'
+import ResultsTable from '../../components/ResultsTable'
 import { ScanText, ArrowLeft } from 'lucide-react'
 
 const DEMO_FIELDS = ['Номер счёта', 'Дата документа', 'Поставщик', 'Сумма без НДС', 'Сумма НДС']
