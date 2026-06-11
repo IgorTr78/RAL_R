@@ -1,8 +1,8 @@
 'use client'
 import { useState } from 'react'
-import UploadZone from '@/components/UploadZone'
-import ParametersForm from '@/components/ParametersForm'
-import TaskList from '@/components/TaskList'
+import UploadZone from '../components/UploadZone'
+import ParametersForm from '../components/ParametersForm'
+import TaskList from '../components/TaskList'
 import { ScanText } from 'lucide-react'
 
 const DEMO_TASKS = [
