@@ -6,6 +6,8 @@ import TaskList from '../components/TaskList'
 import { supabase } from '../lib/supabaseClient'
 import { ScanText } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default function HomePage() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(false)
