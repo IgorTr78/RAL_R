@@ -1,20 +1,43 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import UploadZone from '../components/UploadZone'
 import ParametersForm from '../components/ParametersForm'
 import TaskList from '../components/TaskList'
+import { supabase } from '../lib/supabaseClient'
 import { ScanText } from 'lucide-react'
-
-const DEMO_TASKS = [
-  { id: '3', filename: 'счета_декабрь.zip', size: '2.4 МБ', created_at: '11.06.2026', doc_count: 12, status: 'processing' },
-  { id: '2', filename: 'акт_сверки.pdf',    size: '310 КБ', created_at: '10.06.2026', doc_count: 1,  status: 'done' },
-  { id: '1', filename: 'договор.pdf',       size: '184 КБ', created_at: '09.06.2026', doc_count: 1,  status: 'failed' },
-]
 
 export default function HomePage() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(false)
-  const [tasks, setTasks] = useState(DEMO_TASKS)
+  const [tasks, setTasks] = useState([])
+  const [loadingTasks, setLoadingTasks] = useState(true)
+
+  const loadTasks = async () => {
+    setLoadingTasks(true)
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Ошибка загрузки задач:', error)
+    } else {
+      const mapped = data.map(t => ({
+        id: t.id,
+        filename: t.filename,
+        size: t.file_size ? (t.file_size / 1024).toFixed(0) + ' КБ' : '—',
+        created_at: new Date(t.created_at).toLocaleDateString('ru-RU'),
+        doc_count: t.doc_count,
+        status: t.status,
+      }))
+      setTasks(mapped)
+    }
+    setLoadingTasks(false)
+  }
+
+  useEffect(() => {
+    loadTasks()
+  }, [])
 
   const handleRecognize = async (fields) => {
     if (files.length === 0) {
@@ -22,17 +45,55 @@ export default function HomePage() {
       return
     }
     setLoading(true)
-    await new Promise(r => setTimeout(r, 1500))
-    const newTask = {
-      id: String(Date.now()),
-      filename: files[0].name,
-      size: (files[0].size / 1024).toFixed(0) + ' КБ',
-      created_at: new Date().toLocaleDateString('ru-RU'),
-      doc_count: files.length,
-      status: 'done',
+
+    try {
+      const file = files[0]
+      const filePath = `${Date.now()}_${file.name}`
+
+      // 1. Загружаем файл в Storage
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file)
+
+      if (uploadError) throw uploadError
+
+      // 2. Создаём запись задачи в БД
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .insert({
+          filename: file.name,
+          file_size: file.size,
+          doc_count: files.length,
+          status: 'pending',
+          fields: fields,
+        })
+        .select()
+        .single()
+
+      if (taskError) throw taskError
+
+      // 3. Создаём запись документа, связанную с задачей
+      const { error: docError } = await supabase
+        .from('documents')
+        .insert({
+          task_id: taskData.id,
+          filename: file.name,
+          file_path: filePath,
+          file_size: file.size,
+          status: 'pending',
+        })
+
+      if (docError) throw docError
+
+      // 4. Обновляем список задач
+      await loadTasks()
+      setFiles([])
+    } catch (err) {
+      console.error('Ошибка:', err)
+      alert('Ошибка при загрузке: ' + err.message)
+    } finally {
+      setLoading(false)
     }
-    setTasks(prev => [newTask, ...prev])
-    setLoading(false)
   }
 
   return (
@@ -82,7 +143,13 @@ export default function HomePage() {
         История загрузок
       </p>
 
-      <TaskList tasks={tasks} onRefresh={() => {}} />
+      {loadingTasks ? (
+        <div style={{ padding: 24, textAlign: 'center', color: '#8aaa8a', fontSize: 14 }}>
+          Загрузка...
+        </div>
+      ) : (
+        <TaskList tasks={tasks} onRefresh={loadTasks} />
+      )}
     </div>
   )
 }
