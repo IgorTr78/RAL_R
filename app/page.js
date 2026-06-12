@@ -50,7 +50,9 @@ export default function HomePage() {
 
     try {
       const file = files[0]
-      const filePath = `${Date.now()}_${file.name}`
+      const ext = file.name.split('.').pop()
+      const safeName = `${Date.now()}.${ext}`
+      const filePath = safeName
 
       // 1. Загружаем файл в Storage
       const { error: uploadError } = await supabase.storage
