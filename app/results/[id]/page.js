@@ -59,6 +59,11 @@ export default function ResultsPage({ params }) {
     load()
   }, [id])
 
+  const taskFields = task?.fields || []
+  const displayFields = taskFields.includes('Вид документа')
+    ? taskFields
+    : ['Вид документа', ...taskFields]
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 24px' }}>
       <div style={{
@@ -102,7 +107,7 @@ export default function ResultsPage({ params }) {
         <div style={{ padding: 40, textAlign: 'center', color: '#A32D2D' }}>Ошибка: {error}</div>
       ) : (
         <ResultsTable
-          fields={task?.fields || []}
+          fields={displayFields}
           rows={rows}
           taskName={task?.filename || 'results'}
         />
