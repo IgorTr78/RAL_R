@@ -165,41 +165,56 @@ export default function HomePage() {
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '28px 24px' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 32, paddingBottom: 16, borderBottom: '0.5px solid #d6e8d0',
+        marginBottom: 32, paddingBottom: 16, borderBottom: '1.5px solid #ECEFEC',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{
-            background: '#3B6D11', borderRadius: 10, padding: '7px 9px',
-            display: 'flex', alignItems: 'center',
+            background: 'linear-gradient(135deg, #1C6B41 0%, #14532D 100%)',
+            borderRadius: 13, width: 44, height: 44, padding: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'relative', boxShadow: '0 4px 12px rgba(20,83,45,0.25)',
           }}>
-            <ScanText size={20} color="white" />
+            <ScanText size={22} color="white" />
+            <div style={{
+              position: 'absolute', top: -4, right: -4, width: 14, height: 14,
+              borderRadius: '50%', background: '#EAB308', border: '2.5px solid #F6F7F6',
+            }} />
           </div>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#1a2e1a' }}>DocRecognizer</div>
-            <div style={{ fontSize: 12, color: '#8aaa8a' }}>Распознавание документов</div>
+            <div style={{ fontSize: 19, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>DocRecognizer</div>
+            <div style={{ fontSize: 12.5, color: '#9CA6A0', fontWeight: 500, marginTop: 1 }}>Распознавание документов</div>
           </div>
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 12, fontWeight: 600, color: '#1C6B41',
+          background: '#ECF6EF', padding: '7px 14px', borderRadius: 999,
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1C6B41', display: 'inline-block' }} />
+          Система активна
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 28 }}>
         {[
-          { label: 'Всего документов', value: stats.total, color: '#1a2e1a' },
-          { label: 'Распознано успешно', value: stats.ok, color: '#3B6D11' },
-          { label: 'Требуют проверки', value: stats.warning, color: '#854F0B' },
-          { label: 'Ошибки', value: stats.error, color: '#A32D2D' },
+          { label: 'Всего документов', value: stats.total, color: '#16201A' },
+          { label: 'Распознано успешно', value: stats.ok, color: '#1C6B41' },
+          { label: 'Требуют проверки', value: stats.warning, color: '#92400E' },
+          { label: 'Ошибки', value: stats.error, color: '#C0392B' },
         ].map(s => (
           <div key={s.label} style={{
-            background: 'white', borderRadius: 12,
-            padding: '16px 20px', border: '0.5px solid #d6e8d0',
+            background: 'white', borderRadius: 18,
+            padding: '20px 22px',
+            boxShadow: '0 1px 2px rgba(22,32,26,0.04), 0 0 0 1px rgba(22,32,26,0.04)',
           }}>
-            <div style={{ fontSize: 12, color: '#6b8f6b', marginBottom: 6, fontWeight: 500 }}>{s.label}</div>
-            <div style={{ fontSize: 26, fontWeight: 600, color: s.color, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 12.5, color: '#9CA6A0', marginBottom: 10, fontWeight: 600 }}>{s.label}</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: s.color, lineHeight: 1, letterSpacing: '-0.03em' }}>{s.value}</div>
           </div>
         ))}
       </div>
 
       <p style={{
-        fontSize: 11, fontWeight: 600, color: '#6b8f6b',
+        fontSize: 11, fontWeight: 600, color: '#9CA6A0',
         textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
       }}>
         Загрузка документов
@@ -209,24 +224,24 @@ export default function HomePage() {
 
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
-        margin: '8px 0 20px', color: '#b0c8b0', fontSize: 12,
+        margin: '8px 0 20px', color: '#C4CCC8', fontSize: 12,
       }}>
-        <div style={{ flex: 1, height: 0.5, background: '#d6e8d0' }} />
+        <div style={{ flex: 1, height: 0.5, background: '#E5E9E6' }} />
         параметры распознавания
-        <div style={{ flex: 1, height: 0.5, background: '#d6e8d0' }} />
+        <div style={{ flex: 1, height: 0.5, background: '#E5E9E6' }} />
       </div>
 
       <ParametersForm onSubmit={handleRecognize} loading={loading} />
 
       <p style={{
-        fontSize: 11, fontWeight: 600, color: '#6b8f6b',
+        fontSize: 11, fontWeight: 600, color: '#9CA6A0',
         textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
       }}>
         История загрузок
       </p>
 
       {loadingTasks ? (
-        <div style={{ padding: 24, textAlign: 'center', color: '#8aaa8a', fontSize: 14 }}>
+        <div style={{ padding: 24, textAlign: 'center', color: '#9CA6A0', fontSize: 14 }}>
           Загрузка...
         </div>
       ) : (
