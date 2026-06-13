@@ -167,10 +167,16 @@ def process_pending_tasks():
         docs_resp = supabase.table("documents").select("*").eq("task_id", task_id).execute()
         documents = docs_resp.data
 
-        statuses = []
-        for doc in documents:
-            status = process_document(doc, fields)
-            statuses.append(status)
+        # Обрабатываем только документы со статусом "pending" —
+        # это либо новая загрузка (все документы pending),
+        # либо повторное распознавание одного конкретного документа
+        pending_docs = [d for d in documents if d["status"] == "pending"]
+        for doc in pending_docs:
+            process_document(doc, fields)
+
+        # Пересчитываем итоговый статус задачи по ВСЕМ документам
+        docs_resp = supabase.table("documents").select("status").eq("task_id", task_id).execute()
+        statuses = [d["status"] for d in docs_resp.data]
 
         if all(s == "ok" for s in statuses):
             final_status = "done"
