@@ -23,19 +23,24 @@ export default function ParametersForm({ onSubmit, loading }) {
   return (
     <div style={{
       background: 'white',
-      border: '0.5px solid #d6e8d0',
-      borderRadius: 14,
-      padding: 24,
+      borderRadius: 20,
+      padding: 26,
       marginBottom: 32,
+      boxShadow: '0 1px 2px rgba(22,32,26,0.04), 0 0 0 1px rgba(22,32,26,0.04)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <ScanText size={18} color="#3B6D11" />
-        <span style={{ fontSize: 15, fontWeight: 600, color: '#1a2e1a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 18 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 10, background: '#ECF6EF',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <ScanText size={17} color="#1C6B41" />
+        </div>
+        <span style={{ fontSize: 16, fontWeight: 800, color: '#16201A', letterSpacing: '-0.01em' }}>
           Параметры распознавания
         </span>
       </div>
 
-      <p style={{ fontSize: 13, color: '#6b8f6b', marginBottom: 10 }}>
+      <p style={{ fontSize: 13, color: '#6B7572', marginBottom: 11, fontWeight: 500 }}>
         Введите поля для извлечения — каждое с новой строки:
       </p>
 
@@ -46,40 +51,50 @@ export default function ParametersForm({ onSubmit, loading }) {
         rows={6}
         style={{
           width: '100%',
-          border: '0.5px solid #d6e8d0',
-          borderRadius: 9,
-          padding: '10px 14px',
+          border: '1.5px solid #ECEFEC',
+          borderRadius: 14,
+          padding: '12px 16px',
           fontSize: 14,
-          color: '#2a3d2a',
+          color: '#16201A',
           resize: 'vertical',
           fontFamily: 'inherit',
-          lineHeight: 1.7,
+          fontWeight: 500,
+          lineHeight: 1.8,
         }}
       />
 
-      <p style={{ fontSize: 12, color: '#aaa', marginTop: 6, marginBottom: 16 }}>
+      <p style={{ fontSize: 12.5, color: '#9CA6A0', marginTop: 8, marginBottom: 18, fontWeight: 500 }}>
         Каждая строка станет отдельной колонкой в таблице результатов
       </p>
 
-      <div style={{ marginBottom: 16 }}>
-        <p style={{ fontSize: 12, color: '#6b8f6b', marginBottom: 8, fontWeight: 500 }}>
-          Модель распознавания:
+      <div style={{ marginBottom: 18 }}>
+        <p style={{ fontSize: 11, color: '#9CA6A0', marginBottom: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          Модель распознавания
         </p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {MODELS.map(m => (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {MODELS.map((m, i) => (
             <button
               key={m.id}
               onClick={() => setModel(m.id)}
               style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
-                padding: '8px 14px', borderRadius: 9,
-                border: model === m.id ? '1.5px solid #3B6D11' : '0.5px solid #d6e8d0',
-                background: model === m.id ? '#f0f7ec' : 'white',
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4,
+                padding: '12px 16px', borderRadius: 13, flex: '1 1 160px',
+                border: model === m.id ? '1.5px solid #1C6B41' : '1.5px solid #ECEFEC',
+                background: model === m.id ? '#ECF6EF' : 'white',
                 cursor: 'pointer', textAlign: 'left',
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a2e1a' }}>{m.label}</span>
-              <span style={{ fontSize: 11, color: '#8aaa8a' }}>{m.desc} · {m.price}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: '#16201A', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', letterSpacing: '-0.01em' }}>
+                {m.label}
+                <span style={{
+                  fontSize: 10, fontWeight: 800, padding: '3px 9px', borderRadius: 7,
+                  background: i === 0 ? '#EAB308' : '#ECEFEC',
+                  color: i === 0 ? '#16201A' : '#9CA6A0',
+                }}>
+                  {i === 0 ? 'эконом' : 'точный'}
+                </span>
+              </span>
+              <span style={{ fontSize: 12, color: '#9CA6A0', fontWeight: 500 }}>{m.desc} · {m.price}</span>
             </button>
           ))}
         </div>
@@ -91,11 +106,13 @@ export default function ParametersForm({ onSubmit, loading }) {
           disabled={loading || !params.trim()}
           style={{
             display: 'flex', alignItems: 'center', gap: 7,
-            padding: '9px 20px', borderRadius: 9, fontSize: 14,
-            background: loading || !params.trim() ? '#c0d4b8' : '#3B6D11',
+            padding: '11px 22px', borderRadius: 12, fontSize: 14,
+            background: loading || !params.trim() ? '#B8C2BC' : 'linear-gradient(135deg, #1C6B41 0%, #14532D 100%)',
             color: 'white', border: 'none',
             cursor: loading || !params.trim() ? 'not-allowed' : 'pointer',
-            fontWeight: 500, transition: 'background 0.2s',
+            fontWeight: 700, transition: 'background 0.2s',
+            boxShadow: loading || !params.trim() ? 'none' : '0 4px 12px rgba(20,83,45,0.22)',
+            letterSpacing: '-0.01em',
           }}
         >
           <ScanText size={15} />
@@ -105,10 +122,10 @@ export default function ParametersForm({ onSubmit, loading }) {
           onClick={() => setParams('')}
           style={{
             display: 'flex', alignItems: 'center', gap: 7,
-            padding: '9px 16px', borderRadius: 9, fontSize: 14,
-            background: 'white', color: '#6b8f6b',
-            border: '0.5px solid #d6e8d0',
-            cursor: 'pointer', fontWeight: 500,
+            padding: '11px 18px', borderRadius: 12, fontSize: 14,
+            background: '#F6F7F6', color: '#6B7572',
+            border: 'none',
+            cursor: 'pointer', fontWeight: 700,
           }}
         >
           <X size={14} /> Очистить
