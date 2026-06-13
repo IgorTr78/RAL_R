@@ -12,8 +12,8 @@ const FILTERS = [
 
 function ConfBar({ value }) {
   const pct = Math.round(value)
-  const color = pct >= 80 ? '#639922' : pct >= 50 ? '#EF9F27' : '#E24B4A'
-  const textColor = pct >= 80 ? '#3B6D11' : pct >= 50 ? '#854F0B' : '#A32D2D'
+  const color = pct >= 80 ? '#1C6B41' : pct >= 50 ? '#EAB308' : '#DC2626'
+  const textColor = pct >= 80 ? '#1C6B41' : pct >= 50 ? '#92400E' : '#C0392B'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div style={{ width: 48, height: 4, borderRadius: 2, background: '#e8f0e8' }}>
@@ -27,7 +27,7 @@ function ConfBar({ value }) {
 function StatusDot({ status }) {
   if (status === 'pending' || status === 'processing') {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: '#1565C0' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: '#3052D6' }}>
         <Loader2 size={12} className="animate-spin" />
         {status === 'pending' ? 'В очереди' : 'Обработка'}
       </span>
@@ -35,9 +35,9 @@ function StatusDot({ status }) {
   }
 
   const map = {
-    ok:      { dot: '#639922', label: 'Готово' },
-    warning: { dot: '#EF9F27', label: 'Проверить' },
-    error:   { dot: '#E24B4A', label: 'Ошибка' },
+    ok:      { dot: '#1C6B41', label: 'Готово' },
+    warning: { dot: '#EAB308', label: 'Проверить' },
+    error:   { dot: '#DC2626', label: 'Ошибка' },
   }
   const s = map[status] || map.ok
   return (
@@ -178,56 +178,58 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
         {[
-          { label: 'Всего документов', value: statCounts.total, color: '#1a2e1a' },
-          { label: 'Распознано успешно', value: statCounts.ok, color: '#3B6D11' },
-          { label: 'Требуют проверки', value: statCounts.warning, color: '#854F0B' },
-          { label: 'Ошибки', value: statCounts.error, color: '#A32D2D' },
+          { label: 'Всего документов', value: statCounts.total, color: '#16201A' },
+          { label: 'Распознано успешно', value: statCounts.ok, color: '#1C6B41' },
+          { label: 'Требуют проверки', value: statCounts.warning, color: '#92400E' },
+          { label: 'Ошибки', value: statCounts.error, color: '#C0392B' },
         ].map(s => (
           <div key={s.label} style={{
-            background: 'white', borderRadius: 12,
-            padding: '16px 20px', border: '0.5px solid #d6e8d0',
+            background: 'white', borderRadius: 18,
+            padding: '20px 22px',
+            boxShadow: '0 1px 2px rgba(22,32,26,0.04), 0 0 0 1px rgba(22,32,26,0.04)',
           }}>
-            <div style={{ fontSize: 12, color: '#6b8f6b', marginBottom: 6, fontWeight: 500 }}>{s.label}</div>
-            <div style={{ fontSize: 26, fontWeight: 600, color: s.color, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 12.5, color: '#9CA6A0', marginBottom: 10, fontWeight: 600 }}>{s.label}</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: s.color, lineHeight: 1, letterSpacing: '-0.03em' }}>{s.value}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ background: 'white', border: '0.5px solid #d6e8d0', borderRadius: 14, overflow: 'hidden' }}>
+      <div style={{ background: 'white', borderRadius: 20, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,32,26,0.04), 0 0 0 1px rgba(22,32,26,0.04)' }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 20px', borderBottom: '0.5px solid #eaf3e4',
+          padding: '18px 24px', borderBottom: '1.5px solid #F0F2F0', flexWrap: 'wrap', gap: 12,
         }}>
           <div style={{ display: 'flex', gap: 8 }}>
             {FILTERS.map(f => (
               <button key={f.key} onClick={() => setFilter(f.key)} style={{
-                fontSize: 12, padding: '4px 14px', borderRadius: 20, cursor: 'pointer',
-                fontWeight: 500, border: '0.5px solid #d6e8d0',
-                background: filter === f.key ? '#3B6D11' : 'white',
-                color: filter === f.key ? 'white' : '#3B6D11',
+                fontSize: 12.5, padding: '7px 16px', borderRadius: 999, cursor: 'pointer',
+                fontWeight: 700, border: 'none',
+                background: filter === f.key ? '#16201A' : '#F6F7F6',
+                color: filter === f.key ? 'white' : '#6B7572',
               }}>{f.label}</button>
             ))}
           </div>
           <button onClick={exportCSV} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 13, padding: '7px 16px', borderRadius: 8,
-            background: '#3B6D11', color: 'white', border: 'none',
-            cursor: 'pointer', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: 7,
+            fontSize: 13, padding: '9px 18px', borderRadius: 12,
+            background: 'linear-gradient(135deg, #1C6B41 0%, #14532D 100%)', color: 'white', border: 'none',
+            cursor: 'pointer', fontWeight: 700, letterSpacing: '-0.01em',
+            boxShadow: '0 4px 12px rgba(20,83,45,0.22)',
           }}>
             <Download size={14} /> Экспорт CSV
           </button>
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
             <thead>
-              <tr style={{ background: '#f2f8ee' }}>
+              <tr style={{ background: '#FAFBFA' }}>
                 {['#', 'Файл', ...fields, 'Уверенность', 'Статус', ''].map(h => (
                   <th key={h} style={{
-                    padding: '10px 16px', textAlign: 'left',
-                    fontSize: 11, fontWeight: 600, color: '#5a7a5a',
-                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                    borderBottom: '0.5px solid #e4f0de', whiteSpace: 'nowrap',
+                    padding: '12px 24px', textAlign: 'left',
+                    fontSize: 11, fontWeight: 700, color: '#9CA6A0',
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    borderBottom: '1.5px solid #F0F2F0', whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
               </tr>
@@ -235,21 +237,21 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
             <tbody>
               {filtered.map((row, i) => (
                 <tr key={row.id} style={{
-                  borderBottom: '0.5px solid #f0f7ec',
-                  background: row.status === 'error' ? '#fff8f8'
-                    : row.status === 'warning' ? '#fffdf5'
+                  borderBottom: '1.5px solid #F6F7F6',
+                  background: row.status === 'error' ? '#FDF5F5'
+                    : row.status === 'warning' ? '#FEFBF0'
                     : (row.status === 'pending' || row.status === 'processing') ? '#f0f7ff'
                     : 'white',
                 }}>
-                  <td style={{ padding: '11px 16px', color: '#8aaa8a' }}>{i + 1}</td>
+                  <td style={{ padding: '11px 16px', color: '#9CA6A0' }}>{i + 1}</td>
                   <td style={{ padding: '11px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ background: '#eaf3de', borderRadius: 6, padding: '4px 7px' }}>
-                        <FileText size={14} color="#3B6D11" />
+                      <div style={{ background: '#ECF6EF', borderRadius: 6, padding: '4px 7px' }}>
+                        <FileText size={14} color="#1C6B41" />
                       </div>
                       <div>
-                        <div style={{ fontWeight: 500, color: '#1a2e1a' }}>{row.filename}</div>
-                        <div style={{ fontSize: 11, color: '#8aaa8a' }}>{row.size}</div>
+                        <div style={{ fontWeight: 500, color: '#16201A' }}>{row.filename}</div>
+                        <div style={{ fontSize: 11, color: '#9CA6A0' }}>{row.size}</div>
                       </div>
                     </div>
                   </td>
@@ -261,12 +263,12 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                           onChange={(e) => setEditValues(prev => ({ ...prev, [f]: e.target.value }))}
                           style={{
                             width: '100%', fontSize: 13, padding: '5px 8px',
-                            border: '0.5px solid #639922', borderRadius: 6,
-                            color: '#2a3d2a', fontFamily: 'inherit',
+                            border: '1.5px solid #1C6B41', borderRadius: 6,
+                            color: '#16201A', fontFamily: 'inherit',
                           }}
                         />
                       ) : row.values?.[f] ? (
-                        <span style={{ color: '#2a3d2a' }}>{row.values[f]}</span>
+                        <span style={{ color: '#16201A' }}>{row.values[f]}</span>
                       ) : (
                         <span style={{ color: '#bbb', fontStyle: 'italic', fontSize: 12 }}>не найдено</span>
                       )}
@@ -280,12 +282,12 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                   </td>
                   <td style={{ padding: '11px 16px' }}>
                     {row.status === 'pending' || row.status === 'processing' ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8aaa8a' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9CA6A0' }}>
                         <Loader2 size={14} className="animate-spin" /> Подождите...
                       </span>
                     ) : editingId === row.id ? (
                       savingId === row.id ? (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b8f6b' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9CA6A0' }}>
                           <Loader2 size={14} className="animate-spin" /> Сохранение...
                         </span>
                       ) : (
@@ -296,8 +298,8 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                             style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               width: 28, height: 28, borderRadius: 6,
-                              border: '0.5px solid #3B6D11', color: 'white',
-                              background: '#3B6D11', cursor: 'pointer',
+                              border: '1.5px solid #1C6B41', color: 'white',
+                              background: '#1C6B41', cursor: 'pointer',
                             }}
                           >
                             <Check size={14} />
@@ -308,7 +310,7 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                             style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               width: 28, height: 28, borderRadius: 6,
-                              border: '0.5px solid #d6e8d0', color: '#6b8f6b',
+                              border: '1.5px solid #E5E9E6', color: '#9CA6A0',
                               background: 'white', cursor: 'pointer',
                             }}
                           >
@@ -324,7 +326,7 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                           style={{
                             display: 'flex', alignItems: 'center', gap: 5,
                             fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            border: '1.5px solid #E5E9E6', color: '#1C6B41',
                             background: 'white', cursor: 'pointer', fontWeight: 500,
                           }}>
                           <Pencil size={12} />
@@ -336,7 +338,7 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             width: 28, height: 28, borderRadius: 6,
-                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            border: '1.5px solid #E5E9E6', color: '#1C6B41',
                             background: 'white', cursor: 'pointer',
                           }}>
                           <RefreshCw size={13} />
