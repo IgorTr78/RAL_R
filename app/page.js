@@ -61,7 +61,7 @@ export default function HomePage() {
     loadStats()
   }, [])
 
-  const handleRecognize = async (fields) => {
+  const handleRecognize = async (fields, model) => {
     if (files.length === 0) {
       alert('Сначала выберите файл для загрузки')
       return
@@ -90,6 +90,7 @@ export default function HomePage() {
           doc_count: files.length,
           status: 'pending',
           fields: fields,
+          model: model || 'gpt-4o-mini',
         })
         .select()
         .single()
