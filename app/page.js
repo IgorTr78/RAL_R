@@ -1,179 +1,187 @@
 'use client'
 import { useState, useEffect } from 'react'
-import UploadZone from '../components/UploadZone'
-import ParametersForm from '../components/ParametersForm'
-import TaskList from '../components/TaskList'
+import { FileText, Download, Loader2, Check, X as XIcon, Pencil, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { ScanText } from 'lucide-react'
 
-export const dynamic = 'force-dynamic'
+const FILTERS = [
+  { key: 'all',     label: 'Все' },
+  { key: 'ok',      label: 'Готово' },
+  { key: 'warning', label: 'Проверить' },
+  { key: 'error',   label: 'Ошибки' },
+]
 
-export default function HomePage() {
-  const [files, setFiles] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [tasks, setTasks] = useState([])
-  const [loadingTasks, setLoadingTasks] = useState(true)
-  const [stats, setStats] = useState({ total: 0, ok: 0, warning: 0, error: 0 })
+function ConfBar({ value }) {
+  const pct = Math.round(value)
+  const color = pct >= 80 ? '#639922' : pct >= 50 ? '#EF9F27' : '#E24B4A'
+  const textColor = pct >= 80 ? '#3B6D11' : pct >= 50 ? '#854F0B' : '#A32D2D'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ width: 48, height: 4, borderRadius: 2, background: '#e8f0e8' }}>
+        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 2, background: color }} />
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 500, color: textColor }}>{pct}%</span>
+    </div>
+  )
+}
 
-  const loadStats = async () => {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('status')
-
-    if (error) {
-      console.error('Ошибка загрузки статистики:', error)
-      return
-    }
-
-    setStats({
-      total: data.length,
-      ok: data.filter(d => d.status === 'ok').length,
-      warning: data.filter(d => d.status === 'warning').length,
-      error: data.filter(d => d.status === 'error').length,
-    })
+function StatusDot({ status }) {
+  if (status === 'pending' || status === 'processing') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: '#1565C0' }}>
+        <Loader2 size={12} className="animate-spin" />
+        {status === 'pending' ? 'В очереди' : 'Обработка'}
+      </span>
+    )
   }
 
-  const loadTasks = async () => {
-    setLoadingTasks(true)
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Ошибка загрузки задач:', error)
-    } else {
-      const mapped = data.map(t => ({
-        id: t.id,
-        filename: t.filename,
-        size: t.file_size ? (t.file_size / 1024).toFixed(0) + ' КБ' : '—',
-        created_at: new Date(t.created_at).toLocaleDateString('ru-RU'),
-        doc_count: t.doc_count,
-        status: t.status,
-      }))
-      setTasks(mapped)
-    }
-    setLoadingTasks(false)
+  const map = {
+    ok:      { dot: '#639922', label: 'Готово' },
+    warning: { dot: '#EF9F27', label: 'Проверить' },
+    error:   { dot: '#E24B4A', label: 'Ошибка' },
   }
+  const s = map[status] || map.ok
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: s.dot, display: 'inline-block' }} />
+      {s.label}
+    </span>
+  )
+}
+
+export default function ResultsTable({ fields = [], rows = [], taskName = '', taskId = null }) {
+  const [filter, setFilter] = useState('all')
+  const [localRows, setLocalRows] = useState(rows)
+  const [editingId, setEditingId] = useState(null)
+  const [editValues, setEditValues] = useState({})
+  const [savingId, setSavingId] = useState(null)
 
   useEffect(() => {
-    loadTasks()
-    loadStats()
-  }, [])
+    setLocalRows(rows)
+  }, [rows])
 
-  const handleRecognize = async (fields, model) => {
-    if (files.length === 0) {
-      alert('Сначала выберите файл для загрузки')
-      return
-    }
-    setLoading(true)
+  const startEdit = (row) => {
+    setEditingId(row.id)
+    setEditValues({ ...(row.values || {}) })
+  }
 
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditValues({})
+  }
+
+  const saveEdit = async (row) => {
+    setSavingId(row.id)
     try {
-      const file = files[0]
-      const ext = file.name.split('.').pop()
-      const safeName = `${Date.now()}.${ext}`
-      const filePath = safeName
-
-      // 1. Загружаем файл в Storage
-      const { error: uploadError } = await supabase.storage
+      const { error } = await supabase
         .from('documents')
-        .upload(filePath, file)
+        .update({ values: editValues, status: 'ok', confidence: 100, error_message: null })
+        .eq('id', row.id)
 
-      if (uploadError) throw uploadError
+      if (error) throw error
 
-      // 2. Создаём запись задачи в БД
-      const { data: taskData, error: taskError } = await supabase
-        .from('tasks')
-        .insert({
-          filename: file.name,
-          file_size: file.size,
-          doc_count: files.length,
-          status: 'pending',
-          fields: fields,
-          model: model || 'gpt-4o-mini',
-        })
-        .select()
-        .single()
-
-      if (taskError) throw taskError
-
-      // 3. Создаём запись документа, связанную с задачей
-      const { error: docError } = await supabase
-        .from('documents')
-        .insert({
-          task_id: taskData.id,
-          filename: file.name,
-          file_path: filePath,
-          file_size: file.size,
-          status: 'pending',
-        })
-
-      if (docError) throw docError
-
-      // 4. Обновляем список задач
-      await loadTasks()
-      await loadStats()
-      setFiles([])
+      setLocalRows(prev => prev.map(r =>
+        r.id === row.id
+          ? { ...r, values: editValues, status: 'ok', confidence: 100 }
+          : r
+      ))
+      setEditingId(null)
+      setEditValues({})
     } catch (err) {
-      console.error('Ошибка:', err)
-      alert('Ошибка при загрузке: ' + err.message)
+      alert('Ошибка сохранения: ' + err.message)
     } finally {
-      setLoading(false)
+      setSavingId(null)
     }
   }
 
-  const handleDelete = async (taskId) => {
+  const retryRecognition = async (row) => {
     try {
-      // 1. Находим документы задачи, чтобы удалить файлы из Storage
-      const { data: docs } = await supabase
+      setLocalRows(prev => prev.map(r =>
+        r.id === row.id ? { ...r, status: 'pending' } : r
+      ))
+
+      await supabase
         .from('documents')
-        .select('file_path')
-        .eq('task_id', taskId)
+        .update({ status: 'pending', error_message: null })
+        .eq('id', row.id)
 
-      if (docs && docs.length > 0) {
-        const paths = docs.map(d => d.file_path)
-        await supabase.storage.from('documents').remove(paths)
+      if (taskId) {
+        await supabase
+          .from('tasks')
+          .update({ status: 'pending' })
+          .eq('id', taskId)
       }
-
-      // 2. Удаляем задачу (документы удалятся автоматически по cascade)
-      const { error } = await supabase.from('tasks').delete().eq('id', taskId)
-      if (error) throw error
-
-      // 3. Обновляем список
-      await loadTasks()
-      await loadStats()
     } catch (err) {
-      console.error('Ошибка удаления:', err)
-      alert('Ошибка при удалении: ' + err.message)
+      alert('Ошибка запуска распознавания: ' + err.message)
     }
+  }
+
+  // Опрашиваем статус документов, которые сейчас в очереди/обработке
+  useEffect(() => {
+    const pendingIds = localRows
+      .filter(r => r.status === 'pending' || r.status === 'processing')
+      .map(r => r.id)
+
+    if (pendingIds.length === 0) return
+
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from('documents')
+        .select('*')
+        .in('id', pendingIds)
+
+      if (data) {
+        setLocalRows(prev => prev.map(r => {
+          const updated = data.find(d => d.id === r.id)
+          if (updated && updated.status !== 'pending' && updated.status !== 'processing') {
+            return {
+              ...r,
+              status: updated.status,
+              confidence: updated.confidence ?? 0,
+              values: updated.values || {},
+            }
+          }
+          return r
+        }))
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [localRows, taskId])
+
+  const rowsData = localRows
+
+  const filtered = filter === 'all' ? rowsData : rowsData.filter(r => r.status === filter)
+
+  const exportCSV = () => {
+    const header = ['Файл', ...fields, 'Уверенность', 'Статус'].join(',')
+    const body = rowsData.map(r => [
+      r.filename,
+      ...fields.map(f => r.values?.[f] ?? ''),
+      r.confidence,
+      r.status,
+    ].join(','))
+    const csv = [header, ...body].join('\n')
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url
+    a.download = `results_${taskName}.csv`; a.click()
+  }
+
+  const statCounts = {
+    total: rowsData.length,
+    ok: rowsData.filter(r => r.status === 'ok').length,
+    warning: rowsData.filter(r => r.status === 'warning').length,
+    error: rowsData.filter(r => r.status === 'error').length,
   }
 
   return (
-    <div style={{ maxWidth: 920, margin: '0 auto', padding: '28px 24px' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 32, paddingBottom: 16, borderBottom: '0.5px solid #d6e8d0',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            background: '#3B6D11', borderRadius: 10, padding: '7px 9px',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <ScanText size={20} color="white" />
-          </div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#1a2e1a' }}>DocRecognizer</div>
-            <div style={{ fontSize: 12, color: '#8aaa8a' }}>Распознавание документов</div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 28 }}>
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
         {[
-          { label: 'Всего документов', value: stats.total, color: '#1a2e1a' },
-          { label: 'Распознано успешно', value: stats.ok, color: '#3B6D11' },
-          { label: 'Требуют проверки', value: stats.warning, color: '#854F0B' },
-          { label: 'Ошибки', value: stats.error, color: '#A32D2D' },
+          { label: 'Всего документов', value: statCounts.total, color: '#1a2e1a' },
+          { label: 'Распознано успешно', value: statCounts.ok, color: '#3B6D11' },
+          { label: 'Требуют проверки', value: statCounts.warning, color: '#854F0B' },
+          { label: 'Ошибки', value: statCounts.error, color: '#A32D2D' },
         ].map(s => (
           <div key={s.label} style={{
             background: 'white', borderRadius: 12,
@@ -185,40 +193,163 @@ export default function HomePage() {
         ))}
       </div>
 
-      <p style={{
-        fontSize: 11, fontWeight: 600, color: '#6b8f6b',
-        textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
-      }}>
-        Загрузка документов
-      </p>
-
-      <UploadZone onFilesSelected={setFiles} />
-
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        margin: '8px 0 20px', color: '#b0c8b0', fontSize: 12,
-      }}>
-        <div style={{ flex: 1, height: 0.5, background: '#d6e8d0' }} />
-        параметры распознавания
-        <div style={{ flex: 1, height: 0.5, background: '#d6e8d0' }} />
-      </div>
-
-      <ParametersForm onSubmit={handleRecognize} loading={loading} />
-
-      <p style={{
-        fontSize: 11, fontWeight: 600, color: '#6b8f6b',
-        textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
-      }}>
-        История загрузок
-      </p>
-
-      {loadingTasks ? (
-        <div style={{ padding: 24, textAlign: 'center', color: '#8aaa8a', fontSize: 14 }}>
-          Загрузка...
+      <div style={{ background: 'white', border: '0.5px solid #d6e8d0', borderRadius: 14, overflow: 'hidden' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 20px', borderBottom: '0.5px solid #eaf3e4',
+        }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {FILTERS.map(f => (
+              <button key={f.key} onClick={() => setFilter(f.key)} style={{
+                fontSize: 12, padding: '4px 14px', borderRadius: 20, cursor: 'pointer',
+                fontWeight: 500, border: '0.5px solid #d6e8d0',
+                background: filter === f.key ? '#3B6D11' : 'white',
+                color: filter === f.key ? 'white' : '#3B6D11',
+              }}>{f.label}</button>
+            ))}
+          </div>
+          <button onClick={exportCSV} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            fontSize: 13, padding: '7px 16px', borderRadius: 8,
+            background: '#3B6D11', color: 'white', border: 'none',
+            cursor: 'pointer', fontWeight: 500,
+          }}>
+            <Download size={14} /> Экспорт CSV
+          </button>
         </div>
-      ) : (
-        <TaskList tasks={tasks} onRefresh={loadTasks} onDelete={handleDelete} />
-      )}
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#f2f8ee' }}>
+                {['#', 'Файл', ...fields, 'Уверенность', 'Статус', ''].map(h => (
+                  <th key={h} style={{
+                    padding: '10px 16px', textAlign: 'left',
+                    fontSize: 11, fontWeight: 600, color: '#5a7a5a',
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    borderBottom: '0.5px solid #e4f0de', whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((row, i) => (
+                <tr key={row.id} style={{
+                  borderBottom: '0.5px solid #f0f7ec',
+                  background: row.status === 'error' ? '#fff8f8'
+                    : row.status === 'warning' ? '#fffdf5'
+                    : (row.status === 'pending' || row.status === 'processing') ? '#f0f7ff'
+                    : 'white',
+                }}>
+                  <td style={{ padding: '11px 16px', color: '#8aaa8a' }}>{i + 1}</td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ background: '#eaf3de', borderRadius: 6, padding: '4px 7px' }}>
+                        <FileText size={14} color="#3B6D11" />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500, color: '#1a2e1a' }}>{row.filename}</div>
+                        <div style={{ fontSize: 11, color: '#8aaa8a' }}>{row.size}</div>
+                      </div>
+                    </div>
+                  </td>
+                  {fields.map(f => (
+                    <td key={f} style={{ padding: '11px 16px', minWidth: 140 }}>
+                      {editingId === row.id ? (
+                        <input
+                          value={editValues[f] ?? ''}
+                          onChange={(e) => setEditValues(prev => ({ ...prev, [f]: e.target.value }))}
+                          style={{
+                            width: '100%', fontSize: 13, padding: '5px 8px',
+                            border: '0.5px solid #639922', borderRadius: 6,
+                            color: '#2a3d2a', fontFamily: 'inherit',
+                          }}
+                        />
+                      ) : row.values?.[f] ? (
+                        <span style={{ color: '#2a3d2a' }}>{row.values[f]}</span>
+                      ) : (
+                        <span style={{ color: '#bbb', fontStyle: 'italic', fontSize: 12 }}>не найдено</span>
+                      )}
+                    </td>
+                  ))}
+                  <td style={{ padding: '11px 16px' }}>
+                    <ConfBar value={row.confidence ?? 0} />
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <StatusDot status={row.status} />
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    {row.status === 'pending' || row.status === 'processing' ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8aaa8a' }}>
+                        <Loader2 size={14} className="animate-spin" /> Подождите...
+                      </span>
+                    ) : editingId === row.id ? (
+                      savingId === row.id ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b8f6b' }}>
+                          <Loader2 size={14} className="animate-spin" /> Сохранение...
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={() => saveEdit(row)}
+                            title="Сохранить"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 28, height: 28, borderRadius: 6,
+                              border: '0.5px solid #3B6D11', color: 'white',
+                              background: '#3B6D11', cursor: 'pointer',
+                            }}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            title="Отмена"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 28, height: 28, borderRadius: 6,
+                              border: '0.5px solid #d6e8d0', color: '#6b8f6b',
+                              background: 'white', cursor: 'pointer',
+                            }}
+                          >
+                            <XIcon size={14} />
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => startEdit(row)}
+                          title="Исправить вручную"
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            background: 'white', cursor: 'pointer', fontWeight: 500,
+                          }}>
+                          <Pencil size={12} />
+                          {row.status === 'warning' || row.status === 'error' ? 'Исправить' : 'Изменить'}
+                        </button>
+                        <button
+                          onClick={() => retryRecognition(row)}
+                          title="Распознать заново с помощью модели"
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 28, height: 28, borderRadius: 6,
+                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            background: 'white', cursor: 'pointer',
+                          }}>
+                          <RefreshCw size={13} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
