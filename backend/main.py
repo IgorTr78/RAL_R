@@ -33,10 +33,14 @@ def guess_mime_type(filename: str) -> str:
 
 
 def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
-    """Конвертирует первую страницу PDF в PNG (увеличение x2 для лучшего качества)."""
+    """Конвертирует первую страницу PDF в PNG, ограничивая размер ~2000px по большей стороне."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc[0]
-    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    rect = page.rect
+    max_dim = 2000.0
+    zoom = max_dim / max(rect.width, rect.height)
+    zoom = max(1.0, min(zoom, 3.0))
+    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
     return pix.tobytes("png")
 
 
@@ -45,20 +49,31 @@ def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str]) -> 
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
 
-    field_list = "\n".join(f"- {f}" for f in fields)
+    # "Вид документа" определяется всегда, даже если пользователь его не указал
+    all_fields = fields if "Вид документа" in fields else ["Вид документа", *fields]
+    field_list = "\n".join(f"- {f}" for f in all_fields)
 
     prompt = (
         "Ты — система точного извлечения данных из официальных документов "
         "(справки, свидетельства, счета, договоры).\n\n"
         "Извлеки следующие поля:\n"
         f"{field_list}\n\n"
+        "ОПРЕДЕЛЕНИЕ ВИДА ДОКУМЕНТА:\n"
+        "Поле \"Вид документа\" должно содержать краткое и точное название типа "
+        "документа на основе его заголовка, структуры и печатей, например: "
+        "\"Паспорт РФ\", \"Свидетельство ИНН\", \"Счёт на оплату\", "
+        "\"Акт выполненных работ\", \"Договор поставки\", \"Товарная накладная\", "
+        "\"Доверенность\", \"СТС\" (свидетельство о регистрации ТС), "
+        "\"ПТС\" (паспорт транспортного средства) и т.п. "
+        "Если тип определить невозможно — напиши \"Неизвестный документ\".\n\n"
         "ПРАВИЛА ЧТЕНИЯ ЧИСЕЛ И КОДОВ:\n"
         "- Если число или код написан по отдельным клеткам/ячейкам — читай цифры "
         "строго слева направо, без пробелов, как одну непрерывную строку.\n"
         "- Не путай похожие цифры: 0 и О, 1 и 7, 3 и 8, 5 и 6 — внимательно "
         "сверяй форму каждого символа.\n"
         "- Считай количество цифр в поле перед тем как дать ответ — для ИНН "
-        "физлица должно быть 12 цифр, для ИНН организации — 10.\n"
+        "физлица должно быть 12 цифр, для ИНН организации — 10. "
+        "Для VIN-номера автомобиля — строго 17 символов (латиница и цифры).\n"
         "- Перепроверь результат, сверив его с изображением ещё раз перед ответом.\n\n"
         "Ответь СТРОГО в формате JSON, без markdown и пояснений. "
         "Ключи JSON должны точно совпадать с названиями полей выше. "
@@ -110,11 +125,13 @@ def process_document(doc: dict, fields: list[str]):
 
         result = recognize_document(file_bytes, mime_type, fields)
         confidence = result.pop("_confidence", 50)
+        print(f"[doc {doc_id}] confidence={confidence}, result={result}")
 
-        empty_fields = [f for f in fields if not result.get(f)]
+        result_fields = list(result.keys())
+        empty_fields = [f for f in result_fields if not result.get(f)]
         if confidence >= 80 and not empty_fields:
             status = "ok"
-        elif confidence < 40 or len(empty_fields) == len(fields):
+        elif confidence < 40 or len(empty_fields) == len(result_fields):
             status = "error"
         else:
             status = "warning"
