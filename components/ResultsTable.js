@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { FileText, Download, Loader2, Check, X as XIcon, Pencil } from 'lucide-react'
+import { FileText, Download, Loader2, Check, X as XIcon, Pencil, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 
 const FILTERS = [
@@ -25,6 +25,15 @@ function ConfBar({ value }) {
 }
 
 function StatusDot({ status }) {
+  if (status === 'pending' || status === 'processing') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: '#1565C0' }}>
+        <Loader2 size={12} className="animate-spin" />
+        {status === 'pending' ? 'В очереди' : 'Обработка'}
+      </span>
+    )
+  }
+
   const map = {
     ok:      { dot: '#639922', label: 'Готово' },
     warning: { dot: '#EF9F27', label: 'Проверить' },
@@ -39,7 +48,7 @@ function StatusDot({ status }) {
   )
 }
 
-export default function ResultsTable({ fields = [], rows = [], taskName = '' }) {
+export default function ResultsTable({ fields = [], rows = [], taskName = '', taskId = null }) {
   const [filter, setFilter] = useState('all')
   const [localRows, setLocalRows] = useState(rows)
   const [editingId, setEditingId] = useState(null)
@@ -83,6 +92,61 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
       setSavingId(null)
     }
   }
+
+  const retryRecognition = async (row) => {
+    try {
+      setLocalRows(prev => prev.map(r =>
+        r.id === row.id ? { ...r, status: 'pending' } : r
+      ))
+
+      await supabase
+        .from('documents')
+        .update({ status: 'pending', error_message: null })
+        .eq('id', row.id)
+
+      if (taskId) {
+        await supabase
+          .from('tasks')
+          .update({ status: 'pending' })
+          .eq('id', taskId)
+      }
+    } catch (err) {
+      alert('Ошибка запуска распознавания: ' + err.message)
+    }
+  }
+
+  // Опрашиваем статус документов, которые сейчас в очереди/обработке
+  useEffect(() => {
+    const pendingIds = localRows
+      .filter(r => r.status === 'pending' || r.status === 'processing')
+      .map(r => r.id)
+
+    if (pendingIds.length === 0) return
+
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from('documents')
+        .select('*')
+        .in('id', pendingIds)
+
+      if (data) {
+        setLocalRows(prev => prev.map(r => {
+          const updated = data.find(d => d.id === r.id)
+          if (updated && updated.status !== 'pending' && updated.status !== 'processing') {
+            return {
+              ...r,
+              status: updated.status,
+              confidence: updated.confidence ?? 0,
+              values: updated.values || {},
+            }
+          }
+          return r
+        }))
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [localRows, taskId])
 
   const filtered = filter === 'all' ? rowsData : rowsData.filter(r => r.status === filter)
 
@@ -170,7 +234,10 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
               {filtered.map((row, i) => (
                 <tr key={row.id} style={{
                   borderBottom: '0.5px solid #f0f7ec',
-                  background: row.status === 'error' ? '#fff8f8' : row.status === 'warning' ? '#fffdf5' : 'white',
+                  background: row.status === 'error' ? '#fff8f8'
+                    : row.status === 'warning' ? '#fffdf5'
+                    : (row.status === 'pending' || row.status === 'processing') ? '#f0f7ff'
+                    : 'white',
                 }}>
                   <td style={{ padding: '11px 16px', color: '#8aaa8a' }}>{i + 1}</td>
                   <td style={{ padding: '11px 16px' }}>
@@ -210,7 +277,11 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
                     <StatusDot status={row.status} />
                   </td>
                   <td style={{ padding: '11px 16px' }}>
-                    {editingId === row.id ? (
+                    {row.status === 'pending' || row.status === 'processing' ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8aaa8a' }}>
+                        <Loader2 size={14} className="animate-spin" /> Подождите...
+                      </span>
+                    ) : editingId === row.id ? (
                       savingId === row.id ? (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b8f6b' }}>
                           <Loader2 size={14} className="animate-spin" /> Сохранение...
@@ -244,17 +315,31 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
                         </div>
                       )
                     ) : (
-                      <button
-                        onClick={() => startEdit(row)}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 5,
-                          fontSize: 12, padding: '4px 12px', borderRadius: 6,
-                          border: '0.5px solid #d6e8d0', color: '#3B6D11',
-                          background: 'white', cursor: 'pointer', fontWeight: 500,
-                        }}>
-                        <Pencil size={12} />
-                        {row.status === 'warning' || row.status === 'error' ? 'Исправить' : 'Изменить'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => startEdit(row)}
+                          title="Исправить вручную"
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            background: 'white', cursor: 'pointer', fontWeight: 500,
+                          }}>
+                          <Pencil size={12} />
+                          {row.status === 'warning' || row.status === 'error' ? 'Исправить' : 'Изменить'}
+                        </button>
+                        <button
+                          onClick={() => retryRecognition(row)}
+                          title="Распознать заново с помощью модели"
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 28, height: 28, borderRadius: 6,
+                            border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                            background: 'white', cursor: 'pointer',
+                          }}>
+                          <RefreshCw size={13} />
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
