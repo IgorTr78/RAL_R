@@ -1,6 +1,7 @@
 'use client'
-import { useState } from 'react'
-import { FileText, Download } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { FileText, Download, Loader2, Check, X as XIcon, Pencil } from 'lucide-react'
+import { supabase } from '../lib/supabaseClient'
 
 const FILTERS = [
   { key: 'all',     label: 'Все' },
@@ -40,12 +41,54 @@ function StatusDot({ status }) {
 
 export default function ResultsTable({ fields = [], rows = [], taskName = '' }) {
   const [filter, setFilter] = useState('all')
+  const [localRows, setLocalRows] = useState(rows)
+  const [editingId, setEditingId] = useState(null)
+  const [editValues, setEditValues] = useState({})
+  const [savingId, setSavingId] = useState(null)
 
-  const filtered = filter === 'all' ? rows : rows.filter(r => r.status === filter)
+  useEffect(() => {
+    setLocalRows(rows)
+  }, [rows])
+
+  const startEdit = (row) => {
+    setEditingId(row.id)
+    setEditValues({ ...(row.values || {}) })
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditValues({})
+  }
+
+  const saveEdit = async (row) => {
+    setSavingId(row.id)
+    try {
+      const { error } = await supabase
+        .from('documents')
+        .update({ values: editValues, status: 'ok', confidence: 100, error_message: null })
+        .eq('id', row.id)
+
+      if (error) throw error
+
+      setLocalRows(prev => prev.map(r =>
+        r.id === row.id
+          ? { ...r, values: editValues, status: 'ok', confidence: 100 }
+          : r
+      ))
+      setEditingId(null)
+      setEditValues({})
+    } catch (err) {
+      alert('Ошибка сохранения: ' + err.message)
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const filtered = filter === 'all' ? rowsData : rowsData.filter(r => r.status === filter)
 
   const exportCSV = () => {
     const header = ['Файл', ...fields, 'Уверенность', 'Статус'].join(',')
-    const body = rows.map(r => [
+    const body = rowsData.map(r => [
       r.filename,
       ...fields.map(f => r.values?.[f] ?? ''),
       r.confidence,
@@ -59,10 +102,10 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
   }
 
   const statCounts = {
-    total: rows.length,
-    ok: rows.filter(r => r.status === 'ok').length,
-    warning: rows.filter(r => r.status === 'warning').length,
-    error: rows.filter(r => r.status === 'error').length,
+    total: rowsData.length,
+    ok: rowsData.filter(r => r.status === 'ok').length,
+    warning: rowsData.filter(r => r.status === 'warning').length,
+    error: rowsData.filter(r => r.status === 'error').length,
   }
 
   return (
@@ -142,11 +185,22 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
                     </div>
                   </td>
                   {fields.map(f => (
-                    <td key={f} style={{ padding: '11px 16px' }}>
-                      {row.values?.[f]
-                        ? <span style={{ color: '#2a3d2a' }}>{row.values[f]}</span>
-                        : <span style={{ color: '#bbb', fontStyle: 'italic', fontSize: 12 }}>не найдено</span>
-                      }
+                    <td key={f} style={{ padding: '11px 16px', minWidth: 140 }}>
+                      {editingId === row.id ? (
+                        <input
+                          value={editValues[f] ?? ''}
+                          onChange={(e) => setEditValues(prev => ({ ...prev, [f]: e.target.value }))}
+                          style={{
+                            width: '100%', fontSize: 13, padding: '5px 8px',
+                            border: '0.5px solid #639922', borderRadius: 6,
+                            color: '#2a3d2a', fontFamily: 'inherit',
+                          }}
+                        />
+                      ) : row.values?.[f] ? (
+                        <span style={{ color: '#2a3d2a' }}>{row.values[f]}</span>
+                      ) : (
+                        <span style={{ color: '#bbb', fontStyle: 'italic', fontSize: 12 }}>не найдено</span>
+                      )}
                     </td>
                   ))}
                   <td style={{ padding: '11px 16px' }}>
@@ -156,13 +210,52 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '' }) 
                     <StatusDot status={row.status} />
                   </td>
                   <td style={{ padding: '11px 16px' }}>
-                    <button style={{
-                      fontSize: 12, padding: '4px 12px', borderRadius: 6,
-                      border: '0.5px solid #d6e8d0', color: '#3B6D11',
-                      background: 'white', cursor: 'pointer', fontWeight: 500,
-                    }}>
-                      {row.status === 'warning' ? 'Исправить' : 'Открыть'}
-                    </button>
+                    {editingId === row.id ? (
+                      savingId === row.id ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b8f6b' }}>
+                          <Loader2 size={14} className="animate-spin" /> Сохранение...
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={() => saveEdit(row)}
+                            title="Сохранить"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 28, height: 28, borderRadius: 6,
+                              border: '0.5px solid #3B6D11', color: 'white',
+                              background: '#3B6D11', cursor: 'pointer',
+                            }}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            title="Отмена"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 28, height: 28, borderRadius: 6,
+                              border: '0.5px solid #d6e8d0', color: '#6b8f6b',
+                              background: 'white', cursor: 'pointer',
+                            }}
+                          >
+                            <XIcon size={14} />
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <button
+                        onClick={() => startEdit(row)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          fontSize: 12, padding: '4px 12px', borderRadius: 6,
+                          border: '0.5px solid #d6e8d0', color: '#3B6D11',
+                          background: 'white', cursor: 'pointer', fontWeight: 500,
+                        }}>
+                        <Pencil size={12} />
+                        {row.status === 'warning' || row.status === 'error' ? 'Исправить' : 'Изменить'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
