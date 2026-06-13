@@ -4,6 +4,12 @@ import { ScanText, X } from 'lucide-react'
 
 export default function ParametersForm({ onSubmit, loading }) {
   const [params, setParams] = useState('')
+  const [model, setModel] = useState('gpt-4o-mini')
+
+  const MODELS = [
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini', desc: 'быстро и дёшево', price: '~$0.0003 / документ' },
+    { id: 'gpt-4o',      label: 'GPT-4o',      desc: 'точнее, дороже', price: '~$0.005 / документ' },
+  ]
 
   const handleSubmit = () => {
     const fields = params
@@ -11,7 +17,7 @@ export default function ParametersForm({ onSubmit, loading }) {
       .map(s => s.trim())
       .filter(Boolean)
     if (fields.length === 0) return
-    if (onSubmit) onSubmit(fields)
+    if (onSubmit) onSubmit(fields, model)
   }
 
   return (
@@ -54,6 +60,30 @@ export default function ParametersForm({ onSubmit, loading }) {
       <p style={{ fontSize: 12, color: '#aaa', marginTop: 6, marginBottom: 16 }}>
         Каждая строка станет отдельной колонкой в таблице результатов
       </p>
+
+      <div style={{ marginBottom: 16 }}>
+        <p style={{ fontSize: 12, color: '#6b8f6b', marginBottom: 8, fontWeight: 500 }}>
+          Модель распознавания:
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {MODELS.map(m => (
+            <button
+              key={m.id}
+              onClick={() => setModel(m.id)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                padding: '8px 14px', borderRadius: 9,
+                border: model === m.id ? '1.5px solid #3B6D11' : '0.5px solid #d6e8d0',
+                background: model === m.id ? '#f0f7ec' : 'white',
+                cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a2e1a' }}>{m.label}</span>
+              <span style={{ fontSize: 11, color: '#8aaa8a' }}>{m.desc} · {m.price}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
         <button
