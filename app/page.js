@@ -13,6 +13,25 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false)
   const [tasks, setTasks] = useState([])
   const [loadingTasks, setLoadingTasks] = useState(true)
+  const [stats, setStats] = useState({ total: 0, ok: 0, warning: 0, error: 0 })
+
+  const loadStats = async () => {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('status')
+
+    if (error) {
+      console.error('Ошибка загрузки статистики:', error)
+      return
+    }
+
+    setStats({
+      total: data.length,
+      ok: data.filter(d => d.status === 'ok').length,
+      warning: data.filter(d => d.status === 'warning').length,
+      error: data.filter(d => d.status === 'error').length,
+    })
+  }
 
   const loadTasks = async () => {
     setLoadingTasks(true)
@@ -39,6 +58,7 @@ export default function HomePage() {
 
   useEffect(() => {
     loadTasks()
+    loadStats()
   }, [])
 
   const handleRecognize = async (fields) => {
@@ -91,6 +111,7 @@ export default function HomePage() {
 
       // 4. Обновляем список задач
       await loadTasks()
+      await loadStats()
       setFiles([])
     } catch (err) {
       console.error('Ошибка:', err)
@@ -119,6 +140,7 @@ export default function HomePage() {
 
       // 3. Обновляем список
       await loadTasks()
+      await loadStats()
     } catch (err) {
       console.error('Ошибка удаления:', err)
       alert('Ошибка при удалении: ' + err.message)
@@ -143,6 +165,23 @@ export default function HomePage() {
             <div style={{ fontSize: 12, color: '#8aaa8a' }}>Распознавание документов</div>
           </div>
         </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 28 }}>
+        {[
+          { label: 'Всего документов', value: stats.total, color: '#1a2e1a' },
+          { label: 'Распознано успешно', value: stats.ok, color: '#3B6D11' },
+          { label: 'Требуют проверки', value: stats.warning, color: '#854F0B' },
+          { label: 'Ошибки', value: stats.error, color: '#A32D2D' },
+        ].map(s => (
+          <div key={s.label} style={{
+            background: 'white', borderRadius: 12,
+            padding: '16px 20px', border: '0.5px solid #d6e8d0',
+          }}>
+            <div style={{ fontSize: 12, color: '#6b8f6b', marginBottom: 6, fontWeight: 500 }}>{s.label}</div>
+            <div style={{ fontSize: 26, fontWeight: 600, color: s.color, lineHeight: 1 }}>{s.value}</div>
+          </div>
+        ))}
       </div>
 
       <p style={{
