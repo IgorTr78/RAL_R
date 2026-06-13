@@ -28,14 +28,15 @@ export default function UploadZone({ onFilesSelected }) {
         onDrop={onDrop}
         onClick={() => fileRef.current.click()}
         style={{
-          border: `2px dashed ${dragging ? '#3B6D11' : '#c0d4b8'}`,
-          borderRadius: 14,
-          padding: '40px 24px',
+          border: `1.5px dashed ${dragging ? '#1C6B41' : '#DCE4DF'}`,
+          borderRadius: 20,
+          padding: '48px 24px',
           textAlign: 'center',
-          background: dragging ? '#eaf3de' : '#fafcf9',
+          background: dragging ? '#ECF6EF' : 'white',
           cursor: 'pointer',
           transition: 'all 0.2s',
           marginBottom: 12,
+          boxShadow: dragging ? '0 0 0 4px #ECF6EF' : 'none',
         }}
       >
         <input
@@ -46,13 +47,18 @@ export default function UploadZone({ onFilesSelected }) {
           style={{ display: 'none' }}
           onChange={(e) => handleFiles(e.target.files)}
         />
-        <div style={{ marginBottom: 12, color: '#3B6D11' }}>
-          <Upload size={36} strokeWidth={1.5} style={{ margin: '0 auto' }} />
+        <div style={{
+          width: 56, height: 56, borderRadius: 16,
+          background: 'linear-gradient(135deg, #ECF6EF 0%, #DCEFE2 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 18px', color: '#1C6B41',
+        }}>
+          <Upload size={26} strokeWidth={2.2} />
         </div>
-        <p style={{ fontSize: 15, fontWeight: 500, color: '#2a3d2a', marginBottom: 4 }}>
+        <p style={{ fontSize: 15.5, fontWeight: 700, color: '#16201A', marginBottom: 5, letterSpacing: '-0.01em' }}>
           Перетащите файл сюда или нажмите для выбора
         </p>
-        <p style={{ fontSize: 13, color: '#8aaa8a' }}>
+        <p style={{ fontSize: 13, color: '#9CA6A0', fontWeight: 500 }}>
           PDF, JPEG, PNG, TIFF — до 20 МБ
         </p>
       </div>
@@ -61,10 +67,10 @@ export default function UploadZone({ onFilesSelected }) {
         <button
           onClick={(e) => { e.stopPropagation(); fileRef.current.click() }}
           style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            padding: '9px 18px', borderRadius: 9, fontSize: 14,
-            background: '#3B6D11', color: 'white', border: 'none',
-            cursor: 'pointer', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '11px 22px', borderRadius: 12, fontSize: 14,
+            background: '#16201A', color: 'white', border: 'none',
+            cursor: 'pointer', fontWeight: 700, letterSpacing: '-0.01em',
           }}
         >
           <File size={16} /> Выбрать файл
@@ -72,11 +78,11 @@ export default function UploadZone({ onFilesSelected }) {
         <button
           onClick={(e) => { e.stopPropagation(); archiveRef.current.click() }}
           style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            padding: '9px 18px', borderRadius: 9, fontSize: 14,
-            background: 'white', color: '#3B6D11',
-            border: '1px solid #3B6D11',
-            cursor: 'pointer', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '11px 22px', borderRadius: 12, fontSize: 14,
+            background: 'white', color: '#16201A',
+            border: '1.5px solid #E5E9E6',
+            cursor: 'pointer', fontWeight: 700, letterSpacing: '-0.01em',
           }}
         >
           <FileArchive size={16} /> Загрузить архив (ZIP)
@@ -92,9 +98,9 @@ export default function UploadZone({ onFilesSelected }) {
 
       {selectedFiles.length > 0 && (
         <div style={{
-          marginTop: 12, padding: '10px 14px',
-          background: '#eaf3de', borderRadius: 9,
-          fontSize: 13, color: '#3B6D11', fontWeight: 500,
+          marginTop: 12, padding: '11px 16px',
+          background: '#ECF6EF', borderRadius: 12,
+          fontSize: 13, color: '#14532D', fontWeight: 600,
         }}>
           ✓ Выбрано файлов: {selectedFiles.length} — {selectedFiles.map(f => f.name).join(', ')}
         </div>
