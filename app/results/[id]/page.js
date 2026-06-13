@@ -50,7 +50,7 @@ export default function ResultsPage({ params }) {
         filename: d.filename,
         size: d.file_size ? (d.file_size / 1024).toFixed(0) + ' КБ' : '—',
         confidence: d.confidence ?? 0,
-        status: d.status === 'pending' || d.status === 'processing' ? 'warning' : d.status,
+        status: d.status,
         values: d.values || {},
       })))
       setLoading(false)
@@ -110,6 +110,7 @@ export default function ResultsPage({ params }) {
           fields={displayFields}
           rows={rows}
           taskName={task?.filename || 'results'}
+          taskId={id}
         />
       )}
     </div>
