@@ -1,6 +1,6 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import { FileText, ChevronRight, RefreshCw } from 'lucide-react'
+import { FileText, ChevronRight, RefreshCw, Trash2 } from 'lucide-react'
 
 const STATUS_MAP = {
   pending:    { label: 'Ожидание',   bg: '#f0f7ec', color: '#3B6D11',  dot: '#639922' },
@@ -25,7 +25,7 @@ function StatusBadge({ status }) {
   )
 }
 
-export default function TaskList({ tasks = [], onRefresh }) {
+export default function TaskList({ tasks = [], onRefresh, onDelete }) {
   const router = useRouter()
 
   return (
@@ -53,7 +53,7 @@ export default function TaskList({ tasks = [], onRefresh }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#f2f8ee' }}>
-              {['#', 'Файл', 'Дата', 'Документов', 'Статус', 'Действие'].map(h => (
+              {['#', 'Файл', 'Дата', 'Документов', 'Статус', 'Действие', ''].map(h => (
                 <th key={h} style={{
                   padding: '10px 16px', textAlign: 'left',
                   fontSize: 11, fontWeight: 600, color: '#5a7a5a',
@@ -102,6 +102,24 @@ export default function TaskList({ tasks = [], onRefresh }) {
                   ) : (
                     <span style={{ fontSize: 12, color: '#8aaa8a' }}>—</span>
                   )}
+                </td>
+                <td style={{ padding: '11px 16px' }}>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Удалить задачу "${task.filename}"? Это действие необратимо.`)) {
+                        onDelete && onDelete(task.id)
+                      }
+                    }}
+                    title="Удалить"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: 6,
+                      border: '0.5px solid #f0d0d0', color: '#A32D2D',
+                      background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </td>
               </tr>
             ))}
