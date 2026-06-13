@@ -44,8 +44,8 @@ def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
     return pix.tobytes("png")
 
 
-def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str]) -> dict:
-    """Отправляет документ в GPT-4o и просит извлечь указанные поля."""
+def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini") -> dict:
+    """Отправляет документ в OpenAI и просит извлечь указанные поля."""
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
 
@@ -106,7 +106,7 @@ def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str]) -> 
     )
 
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {
                 "role": "user",
@@ -132,7 +132,7 @@ def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str]) -> 
     return json.loads(raw)
 
 
-def process_document(doc: dict, fields: list[str]):
+def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
     doc_id = doc["id"]
     file_path = doc["file_path"]
     filename = doc["filename"]
@@ -146,7 +146,7 @@ def process_document(doc: dict, fields: list[str]):
         else:
             mime_type = guess_mime_type(filename)
 
-        result = recognize_document(file_bytes, mime_type, fields)
+        result = recognize_document(file_bytes, mime_type, fields, model)
         confidence = result.pop("_confidence", 50)
         print(f"[doc {doc_id}] confidence={confidence}, result={result}")
 
@@ -183,6 +183,7 @@ def process_pending_tasks():
     for task in tasks:
         task_id = task["id"]
         fields = task.get("fields") or []
+        model = task.get("model") or "gpt-4o-mini"
 
         # Помечаем задачу как "в обработке"
         supabase.table("tasks").update({"status": "processing"}).eq("id", task_id).execute()
@@ -195,7 +196,7 @@ def process_pending_tasks():
         # либо повторное распознавание одного конкретного документа
         pending_docs = [d for d in documents if d["status"] == "pending"]
         for doc in pending_docs:
-            process_document(doc, fields)
+            process_document(doc, fields, model)
 
         # Пересчитываем итоговый статус задачи по ВСЕМ документам
         docs_resp = supabase.table("documents").select("status").eq("task_id", task_id).execute()
