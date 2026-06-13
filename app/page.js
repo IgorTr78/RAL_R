@@ -100,6 +100,31 @@ export default function HomePage() {
     }
   }
 
+  const handleDelete = async (taskId) => {
+    try {
+      // 1. Находим документы задачи, чтобы удалить файлы из Storage
+      const { data: docs } = await supabase
+        .from('documents')
+        .select('file_path')
+        .eq('task_id', taskId)
+
+      if (docs && docs.length > 0) {
+        const paths = docs.map(d => d.file_path)
+        await supabase.storage.from('documents').remove(paths)
+      }
+
+      // 2. Удаляем задачу (документы удалятся автоматически по cascade)
+      const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+      if (error) throw error
+
+      // 3. Обновляем список
+      await loadTasks()
+    } catch (err) {
+      console.error('Ошибка удаления:', err)
+      alert('Ошибка при удалении: ' + err.message)
+    }
+  }
+
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '28px 24px' }}>
       <div style={{
@@ -152,7 +177,7 @@ export default function HomePage() {
           Загрузка...
         </div>
       ) : (
-        <TaskList tasks={tasks} onRefresh={loadTasks} />
+        <TaskList tasks={tasks} onRefresh={loadTasks} onDelete={handleDelete} />
       )}
     </div>
   )
