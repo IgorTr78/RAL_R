@@ -148,6 +148,8 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
     return () => clearInterval(interval)
   }, [localRows, taskId])
 
+  const rowsData = localRows
+
   const filtered = filter === 'all' ? rowsData : rowsData.filter(r => r.status === filter)
 
   const exportCSV = () => {
