@@ -4,6 +4,7 @@ import base64
 import asyncio
 from contextlib import asynccontextmanager
 
+import fitz  # PyMuPDF
 from fastapi import FastAPI
 from supabase import create_client
 from openai import OpenAI
@@ -29,6 +30,14 @@ def guess_mime_type(filename: str) -> str:
         "webp": "image/webp",
         "gif": "image/gif",
     }.get(ext, "image/jpeg")
+
+
+def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
+    """Конвертирует первую страницу PDF в PNG (увеличение x2 для лучшего качества)."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page = doc[0]
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    return pix.tobytes("png")
 
 
 def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str]) -> dict:
@@ -92,7 +101,12 @@ def process_document(doc: dict, fields: list[str]):
 
     try:
         file_bytes = supabase.storage.from_(STORAGE_BUCKET).download(file_path)
-        mime_type = guess_mime_type(filename)
+
+        if filename.lower().endswith(".pdf"):
+            file_bytes = pdf_first_page_to_png(file_bytes)
+            mime_type = "image/png"
+        else:
+            mime_type = guess_mime_type(filename)
 
         result = recognize_document(file_bytes, mime_type, fields)
         confidence = result.pop("_confidence", 50)
