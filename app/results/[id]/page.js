@@ -75,25 +75,31 @@ export default function ResultsPage({ params }) {
             onClick={() => router.push('/')}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 13, color: '#3B6D11', cursor: 'pointer',
-              border: '0.5px solid #3B6D11', borderRadius: 8,
-              padding: '7px 14px', background: 'white', fontWeight: 500,
+              fontSize: 13, color: '#16201A', cursor: 'pointer',
+              border: 'none', borderRadius: 12,
+              padding: '9px 16px', background: '#F6F7F6', fontWeight: 700,
             }}
           >
             <ArrowLeft size={14} /> Назад
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{
-              background: '#3B6D11', borderRadius: 10, padding: '7px 9px',
-              display: 'flex', alignItems: 'center',
+              background: 'linear-gradient(135deg, #1C6B41 0%, #14532D 100%)',
+              borderRadius: 13, width: 44, height: 44,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              position: 'relative', boxShadow: '0 4px 12px rgba(20,83,45,0.25)',
             }}>
-              <ScanText size={20} color="white" />
+              <ScanText size={22} color="white" />
+              <div style={{
+                position: 'absolute', top: -4, right: -4, width: 14, height: 14,
+                borderRadius: '50%', background: '#EAB308', border: '2.5px solid #F6F7F6',
+              }} />
             </div>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#1a2e1a' }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>
                 Результаты распознавания
               </div>
-              <div style={{ fontSize: 13, color: '#6b8f6b', marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: '#9CA6A0', marginTop: 2, fontWeight: 500 }}>
                 {task ? `${task.filename} · ${task.doc_count} документов · ${new Date(task.created_at).toLocaleDateString('ru-RU')}` : '...'}
               </div>
             </div>
@@ -102,9 +108,9 @@ export default function ResultsPage({ params }) {
       </div>
 
       {loading ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#8aaa8a' }}>Загрузка...</div>
+        <div style={{ padding: 40, textAlign: 'center', color: '#9CA6A0' }}>Загрузка...</div>
       ) : error ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#A32D2D' }}>Ошибка: {error}</div>
+        <div style={{ padding: 40, textAlign: 'center', color: '#C0392B' }}>Ошибка: {error}</div>
       ) : (
         <ResultsTable
           fields={displayFields}
