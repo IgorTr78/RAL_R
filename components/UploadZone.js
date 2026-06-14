@@ -90,7 +90,7 @@ export default function UploadZone({ onFilesSelected }) {
         <input
           ref={archiveRef}
           type="file"
-          accept=".zip,.rar"
+          accept=".zip"
           style={{ display: 'none' }}
           onChange={(e) => handleFiles(e.target.files)}
         />
