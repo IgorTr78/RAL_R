@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import difflib
 from contextlib import asynccontextmanager
 
 import fitz  # PyMuPDF
@@ -290,6 +291,152 @@ def process_pending_tasks():
             final_status = "done"  # все warning — результаты есть, но требуют проверки
 
         supabase.table("tasks").update({"status": final_status}).eq("id", task_id).execute()
+
+        # Перекрёстная сверка имён между документами одной задачи
+        if final_status in ("done", "partial") and len(documents) >= 2:
+            try:
+                cross_check_task_names(task_id)
+            except Exception as e:
+                import traceback
+                print(f"[cross_check] неожиданная ошибка: {e}", flush=True)
+                traceback.print_exc()
+
+
+# Поля, по которым выполняется перекрёстная сверка имён между документами
+NAME_FIELD_KEYWORDS = ["имя", "фамилия", "отчество", "фио", "кого выдан", "владелец"]
+
+
+def is_name_field(field_name: str) -> bool:
+    lower = field_name.lower()
+    return any(kw in lower for kw in NAME_FIELD_KEYWORDS)
+
+
+def similar_but_different(a: str, b: str) -> bool:
+    """Похожи, но не идентичны — вероятная ошибка OCR в одном из вариантов."""
+    a, b = a.strip(), b.strip()
+    if not a or not b or a == b:
+        return False
+    ratio = difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    return ratio >= 0.6
+
+
+def resolve_name_conflict(value_a: str, doc_a: dict, value_b: str, doc_b: dict, field: str) -> str | None:
+    """Спрашивает модель, какой из двух похожих вариантов ФИО правильный, глядя на оба изображения.
+    Возвращает правильное значение, либо None если не удалось определить."""
+    try:
+        file_a = supabase.storage.from_(STORAGE_BUCKET).download(doc_a["file_path"])
+        file_b = supabase.storage.from_(STORAGE_BUCKET).download(doc_b["file_path"])
+
+        if doc_a["filename"].lower().endswith(".pdf"):
+            file_a = pdf_first_page_to_png(file_a)
+        if doc_b["filename"].lower().endswith(".pdf"):
+            file_b = pdf_first_page_to_png(file_b)
+
+        mime_a = "image/png" if doc_a["filename"].lower().endswith(".pdf") else guess_mime_type(doc_a["filename"])
+        mime_b = "image/png" if doc_b["filename"].lower().endswith(".pdf") else guess_mime_type(doc_b["filename"])
+
+        b64_a = base64.b64encode(file_a).decode("utf-8")
+        b64_b = base64.b64encode(file_b).decode("utf-8")
+
+        prompt = (
+            f"На двух изображениях документов в поле \"{field}\" распознаны два разных, "
+            f"но похожих значения, вероятно из-за ошибки OCR:\n"
+            f"1) \"{value_a}\"\n"
+            f"2) \"{value_b}\"\n\n"
+            "Внимательно посмотри на оба изображения и определи правильное написание "
+            "этого значения (это, скорее всего, одно и то же имя/фамилия, написанное "
+            "с ошибкой на одном из документов).\n\n"
+            "Ответь СТРОГО в формате JSON без markdown: "
+            "{\"correct_value\": \"<правильное значение>\"}. "
+            "Если ты не уверен, какое значение правильное, верни "
+            "{\"correct_value\": null}."
+        )
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_a};base64,{b64_a}", "detail": "high"}},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_b};base64,{b64_b}", "detail": "high"}},
+                ],
+            }],
+            max_tokens=200,
+            temperature=0,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        result = json.loads(raw)
+        return result.get("correct_value")
+
+    except Exception as e:
+        print(f"[cross_check] ошибка сравнения: {e}", flush=True)
+        return None
+
+
+def cross_check_task_names(task_id: str):
+    """После обработки всех документов задачи — ищет похожие, но разные ФИО
+    в разных документах и пытается определить правильное написание."""
+    docs_resp = supabase.table("documents").select("*").eq("task_id", task_id).execute()
+    documents = [d for d in docs_resp.data if d["status"] in ("ok", "warning") and d.get("values")]
+
+    if len(documents) < 2:
+        return
+
+    print(f"[cross_check] задача {task_id}: проверка {len(documents)} документов", flush=True)
+
+    # Собираем все именные поля: (doc, field_name, value)
+    name_entries = []
+    for doc in documents:
+        for field, value in (doc.get("values") or {}).items():
+            if is_name_field(field) and isinstance(value, str) and value.strip():
+                name_entries.append((doc, field, value.strip()))
+
+    checked_pairs = set()
+
+    for i in range(len(name_entries)):
+        for j in range(i + 1, len(name_entries)):
+            doc_a, field_a, value_a = name_entries[i]
+            doc_b, field_b, value_b = name_entries[j]
+
+            if doc_a["id"] == doc_b["id"]:
+                continue
+
+            pair_key = tuple(sorted([f"{doc_a['id']}:{field_a}:{value_a}", f"{doc_b['id']}:{field_b}:{value_b}"]))
+            if pair_key in checked_pairs:
+                continue
+
+            if not similar_but_different(value_a, value_b):
+                continue
+
+            checked_pairs.add(pair_key)
+            print(f"[cross_check] похожие значения: '{value_a}' ({doc_a['filename']}) vs '{value_b}' ({doc_b['filename']})", flush=True)
+
+            correct = resolve_name_conflict(value_a, doc_a, value_b, doc_b, field_a)
+            if not correct:
+                print("[cross_check] модель не смогла определить правильное значение", flush=True)
+                continue
+
+            print(f"[cross_check] правильное значение: '{correct}'", flush=True)
+
+            # Обновляем документ(ы), где значение отличается от правильного
+            for doc, field, value in [(doc_a, field_a, value_a), (doc_b, field_b, value_b)]:
+                if value != correct:
+                    new_values = dict(doc.get("values") or {})
+                    new_values[field] = correct
+                    supabase.table("documents").update({
+                        "values": new_values,
+                        "status": "ok",
+                        "confidence": max(doc.get("confidence") or 0, 90),
+                    }).eq("id", doc["id"]).execute()
+                    print(f"[cross_check] документ {doc['id']}: '{field}' исправлено на '{correct}'", flush=True)
 
 
 async def polling_loop():
