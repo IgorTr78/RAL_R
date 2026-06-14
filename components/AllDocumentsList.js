@@ -73,6 +73,7 @@ export default function AllDocumentsList() {
   const [allFields, setAllFields] = useState([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [selectedIds, setSelectedIds] = useState(new Set())
   const router = useRouter()
 
   const load = async () => {
@@ -128,11 +129,39 @@ export default function AllDocumentsList() {
 
   const filtered = filter === 'all' ? rows : rows.filter(r => r.status === filter)
 
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(r => selectedIds.has(r.id))
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      if (allFilteredSelected) {
+        const next = new Set(prev)
+        filtered.forEach(r => next.delete(r.id))
+        return next
+      }
+      const next = new Set(prev)
+      filtered.forEach(r => next.add(r.id))
+      return next
+    })
+  }
+
   const exportCSV = () => {
     const headers = ['Файл', ...allFields, 'Источник', 'Уверенность', 'Статус']
     const csvRows = [headers.join(',')]
 
-    for (const row of filtered) {
+    const rowsToExport = selectedIds.size > 0
+      ? filtered.filter(r => selectedIds.has(r.id))
+      : filtered
+
+    for (const row of rowsToExport) {
       const cells = [
         row.filename,
         ...allFields.map(f => row.values[f] || ''),
@@ -192,7 +221,8 @@ export default function AllDocumentsList() {
               cursor: 'pointer', fontWeight: 700, letterSpacing: '-0.01em',
               boxShadow: '0 4px 12px rgba(20,83,45,0.22)',
             }}>
-              <Download size={14} /> Экспорт CSV
+              <Download size={14} />
+              {selectedIds.size > 0 ? `Экспорт CSV (${selectedIds.size})` : 'Экспорт CSV'}
             </button>
           </div>
         </div>
@@ -210,6 +240,17 @@ export default function AllDocumentsList() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
               <thead>
                 <tr style={{ background: '#FAFBFA' }}>
+                  <th style={{
+                    padding: '12px 16px', textAlign: 'left', width: 1,
+                    borderBottom: '1.5px solid #F0F2F0',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#1C6B41' }}
+                    />
+                  </th>
                   {['Файл', ...allFields, 'Источник', 'Уверенность', 'Статус', ''].map(h => (
                     <th key={h} style={{
                       padding: '12px 24px', textAlign: 'left',
@@ -224,11 +265,20 @@ export default function AllDocumentsList() {
                 {filtered.map(row => (
                   <tr key={row.id} style={{
                     borderBottom: '1.5px solid #F6F7F6',
-                    background: row.status === 'error' ? '#FDF5F5'
+                    background: selectedIds.has(row.id) ? '#ECF6EF'
+                      : row.status === 'error' ? '#FDF5F5'
                       : row.status === 'warning' ? '#FEFBF0'
                       : (row.status === 'pending' || row.status === 'processing') ? '#f0f7ff'
                       : 'white',
                   }}>
+                    <td style={{ padding: '11px 16px' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => toggleSelect(row.id)}
+                        style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#1C6B41' }}
+                      />
+                    </td>
                     <td style={{ padding: '11px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ background: '#ECF6EF', borderRadius: 6, padding: '4px 7px' }}>
