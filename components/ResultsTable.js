@@ -1,6 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { FileText, Download, Loader2, Check, X as XIcon, Pencil, RefreshCw } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { FileText, Download, Loader2, Check, X as XIcon, Pencil, RefreshCw, ChevronDown, ImageOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 
 const FILTERS = [
@@ -55,6 +55,9 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
   const [editValues, setEditValues] = useState({})
   const [savingId, setSavingId] = useState(null)
   const [retryPickerId, setRetryPickerId] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+  const [previewUrls, setPreviewUrls] = useState({})
+  const [previewLoading, setPreviewLoading] = useState(null)
 
   const RETRY_MODELS = [
     { id: 'gpt-4o-mini',    label: 'GPT-4o mini' },
@@ -105,6 +108,30 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
       alert('Ошибка сохранения: ' + err.message)
     } finally {
       setSavingId(null)
+    }
+  }
+
+  const togglePreview = async (row) => {
+    if (expandedId === row.id) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(row.id)
+
+    if (!previewUrls[row.id] && row.file_path) {
+      setPreviewLoading(row.id)
+      try {
+        const { data, error } = await supabase.storage
+          .from('documents')
+          .createSignedUrl(row.file_path, 3600)
+
+        if (error) throw error
+        setPreviewUrls(prev => ({ ...prev, [row.id]: data.signedUrl }))
+      } catch (err) {
+        setPreviewUrls(prev => ({ ...prev, [row.id]: 'error' }))
+      } finally {
+        setPreviewLoading(null)
+      }
     }
   }
 
@@ -252,8 +279,9 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
             </thead>
             <tbody>
               {filtered.map((row, i) => (
-                <tr key={row.id} style={{
-                  borderBottom: '1.5px solid #F6F7F6',
+                <React.Fragment key={row.id}>
+                <tr style={{
+                  borderBottom: expandedId === row.id ? 'none' : '1.5px solid #F6F7F6',
                   background: row.status === 'error' ? '#FDF5F5'
                     : row.status === 'warning' ? '#FEFBF0'
                     : (row.status === 'pending' || row.status === 'processing') ? '#f0f7ff'
@@ -261,12 +289,26 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                 }}>
                   <td style={{ padding: '11px 16px', color: '#9CA6A0' }}>{i + 1}</td>
                   <td style={{ padding: '11px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      onClick={() => togglePreview(row)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                      title="Показать изображение документа"
+                    >
                       <div style={{ background: '#ECF6EF', borderRadius: 6, padding: '4px 7px' }}>
                         <FileText size={14} color="#1C6B41" />
                       </div>
                       <div>
-                        <div style={{ fontWeight: 500, color: '#16201A' }}>{row.filename}</div>
+                        <div style={{ fontWeight: 500, color: '#16201A', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          {row.filename}
+                          <ChevronDown
+                            size={13}
+                            color="#9CA6A0"
+                            style={{
+                              transition: 'transform 0.15s',
+                              transform: expandedId === row.id ? 'rotate(180deg)' : 'rotate(0deg)',
+                            }}
+                          />
+                        </div>
                         <div style={{ fontSize: 11, color: '#9CA6A0' }}>{row.size}</div>
                       </div>
                     </div>
@@ -393,6 +435,38 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                     )}
                   </td>
                 </tr>
+                {expandedId === row.id && (
+                  <tr>
+                    <td colSpan={fields.length + 5} style={{ padding: 0, borderBottom: '1.5px solid #F6F7F6', background: '#FAFBFA' }}>
+                      <div style={{ padding: '16px 24px', display: 'flex', justifyContent: 'center' }}>
+                        {previewLoading === row.id ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9CA6A0', fontSize: 13, padding: '24px 0' }}>
+                            <Loader2 size={16} className="animate-spin" /> Загрузка изображения...
+                          </div>
+                        ) : previewUrls[row.id] === 'error' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#C0392B', fontSize: 13, padding: '24px 0' }}>
+                            <ImageOff size={16} /> Не удалось загрузить изображение документа
+                          </div>
+                        ) : previewUrls[row.id] ? (
+                          row.filename.toLowerCase().endsWith('.pdf') ? (
+                            <iframe
+                              src={previewUrls[row.id]}
+                              style={{ width: '100%', maxWidth: 700, height: 500, border: '1.5px solid #ECEFEC', borderRadius: 12 }}
+                              title={row.filename}
+                            />
+                          ) : (
+                            <img
+                              src={previewUrls[row.id]}
+                              alt={row.filename}
+                              style={{ maxWidth: '100%', maxHeight: 500, borderRadius: 12, border: '1.5px solid #ECEFEC' }}
+                            />
+                          )
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
