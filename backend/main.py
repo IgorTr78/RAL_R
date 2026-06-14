@@ -13,6 +13,7 @@ from openai import OpenAI
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+GIGACHAT_CREDENTIALS = os.environ.get("GIGACHAT_CREDENTIALS", "")
 
 POLL_INTERVAL_SECONDS = 10
 STORAGE_BUCKET = "documents"
@@ -44,7 +45,77 @@ def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
     return pix.tobytes("png")
 
 
+def recognize_document_gigachat(file_bytes: bytes, mime_type: str, fields: list[str], model: str) -> dict:
+    """Отправляет документ в GigaChat (vision) и извлекает поля."""
+    from gigachat import GigaChat
+    from gigachat.models import Chat, Messages, MessagesRole
+
+    all_fields = fields if "Вид документа" in fields else ["Вид документа", *fields]
+    field_list = "\n".join(f"- {f}" for f in all_fields)
+
+    # Загружаем изображение в GigaChat Files API, получаем file_id
+    with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+        upload = giga.upload_file(("document.png", file_bytes, "image/png"))
+        file_id = upload.id
+
+        prompt = (
+            "Ты — система точного извлечения данных из официальных документов "
+            "(справки, свидетельства, счета, договоры).\n\n"
+            "Извлеки следующие поля:\n"
+            f"{field_list}\n\n"
+            "ОПРЕДЕЛЕНИЕ ВИДА ДОКУМЕНТА:\n"
+            "Поле \"Вид документа\" должно содержать краткое и точное название типа "
+            "документа, например: \"Паспорт РФ\", \"Свидетельство ИНН\", \"СТС\", \"ПТС\" и т.п. "
+            "Если тип определить невозможно — напиши \"Неизвестный документ\".\n\n"
+            "ПРАВИЛА ЧТЕНИЯ ЧИСЕЛ И КОДОВ:\n"
+            "- Для ИНН, VIN, СНИЛС — одна непрерывная строка без пробелов.\n"
+            "- Для остальных номеров (серия/номер паспорта, свидетельства) — "
+            "сохраняй точный формат с пробелами как на документе.\n"
+            "- Не путай похожие символы: 0/О, 1/7, 3/8.\n\n"
+            "ПРОВЕРКА ИМЁН:\n"
+            "Если среди полей есть \"Имя\", \"Фамилия\", \"Отчество\" или \"ФИО\" — "
+            "проверяй каждое слово на правдоподобность как русское имя/отчество. "
+            "Отчества заканчиваются на -ович/-евич/-овна/-евна. "
+            "Если слово не похоже на реальное имя/отчество — исправь или снизь _confidence до ≤60.\n\n"
+            "Ответь СТРОГО в формате JSON, без markdown и пояснений. "
+            "Ключи JSON должны точно совпадать с названиями полей выше. "
+            "Если поле не найдено — используй пустую строку \"\". "
+            "Также добавь ключ \"_confidence\" — целое число от 0 до 100."
+        )
+
+        payload = Chat(
+            model=model,
+            messages=[
+                Messages(
+                    role=MessagesRole.USER,
+                    content=prompt,
+                    attachments=[file_id],
+                )
+            ],
+            temperature=0,
+            max_tokens=1000,
+        )
+
+        response = giga.chat(payload)
+        raw = response.choices[0].message.content.strip()
+
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    return json.loads(raw)
+
+
 def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini") -> dict:
+    """Роутер: выбирает OpenAI или GigaChat в зависимости от модели."""
+    if model.startswith("GigaChat"):
+        return recognize_document_gigachat(file_bytes, mime_type, fields, model)
+    return recognize_document_openai(file_bytes, mime_type, fields, model)
+
+
+def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini") -> dict:
     """Отправляет документ в OpenAI и просит извлечь указанные поля."""
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
@@ -148,7 +219,7 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
 
         result = recognize_document(file_bytes, mime_type, fields, model)
         confidence = result.pop("_confidence", 50)
-        print(f"[doc {doc_id}] confidence={confidence}, result={result}")
+        print(f"[doc {doc_id}] confidence={confidence}, result={result}", flush=True)
 
         result_fields = list(result.keys())
         empty_fields = [f for f in result_fields if not result.get(f)]
@@ -179,6 +250,7 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
 def process_pending_tasks():
     tasks_resp = supabase.table("tasks").select("*").eq("status", "pending").limit(1).execute()
     tasks = tasks_resp.data
+    print(f"[tick] найдено задач со статусом pending: {len(tasks)}", flush=True)
 
     for task in tasks:
         task_id = task["id"]
@@ -215,11 +287,14 @@ def process_pending_tasks():
 
 
 async def polling_loop():
+    print("[polling_loop] запущен", flush=True)
     while True:
         try:
             process_pending_tasks()
         except Exception as e:
-            print(f"Ошибка в цикле обработки: {e}")
+            import traceback
+            print(f"Ошибка в цикле обработки: {e}", flush=True)
+            traceback.print_exc()
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
