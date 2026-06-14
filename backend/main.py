@@ -209,7 +209,9 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
     filename = doc["filename"]
 
     try:
+        print(f"[doc {doc_id}] начало обработки: {filename}, path={file_path}", flush=True)
         file_bytes = supabase.storage.from_(STORAGE_BUCKET).download(file_path)
+        print(f"[doc {doc_id}] файл загружен, размер={len(file_bytes)} байт", flush=True)
 
         if filename.lower().endswith(".pdf"):
             file_bytes = pdf_first_page_to_png(file_bytes)
@@ -217,6 +219,7 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
         else:
             mime_type = guess_mime_type(filename)
 
+        print(f"[doc {doc_id}] отправка в модель {model}...", flush=True)
         result = recognize_document(file_bytes, mime_type, fields, model)
         confidence = result.pop("_confidence", 50)
         print(f"[doc {doc_id}] confidence={confidence}, result={result}", flush=True)
@@ -240,6 +243,9 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
         return status
 
     except Exception as e:
+        import traceback
+        print(f"[doc {doc_id}] ОШИБКА: {e}", flush=True)
+        traceback.print_exc()
         supabase.table("documents").update({
             "status": "error",
             "error_message": str(e),
