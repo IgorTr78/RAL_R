@@ -275,7 +275,8 @@ def process_pending_tasks():
         # либо повторное распознавание одного конкретного документа
         pending_docs = [d for d in documents if d["status"] == "pending"]
         for doc in pending_docs:
-            process_document(doc, fields, model)
+            doc_model = doc.get("model") or model
+            process_document(doc, fields, doc_model)
 
         # Пересчитываем итоговый статус задачи по ВСЕМ документам
         docs_resp = supabase.table("documents").select("status").eq("task_id", task_id).execute()
