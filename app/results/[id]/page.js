@@ -52,6 +52,7 @@ export default function ResultsPage({ params }) {
         confidence: d.confidence ?? 0,
         status: d.status,
         values: d.values || {},
+        file_path: d.file_path,
       })))
       setLoading(false)
     }
