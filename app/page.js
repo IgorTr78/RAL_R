@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import UploadZone from '../components/UploadZone'
 import ParametersForm from '../components/ParametersForm'
 import TaskList from '../components/TaskList'
+import AllDocumentsList from '../components/AllDocumentsList'
 import { supabase } from '../lib/supabaseClient'
 import { ScanText } from 'lucide-react'
 import JSZip from 'jszip'
@@ -311,6 +312,8 @@ export default function HomePage() {
       ) : (
         <TaskList tasks={tasks} onRefresh={loadTasks} onDelete={handleDelete} />
       )}
+
+      <AllDocumentsList />
     </div>
   )
 }
