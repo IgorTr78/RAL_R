@@ -34,6 +34,36 @@ def guess_mime_type(filename: str) -> str:
     }.get(ext, "image/jpeg")
 
 
+def is_valid_inn(inn: str) -> bool | None:
+    """Проверяет контрольную сумму ИНН по алгоритму ФНС.
+    Возвращает True/False для валидного формата (10 или 12 цифр),
+    или None если строка не похожа на ИНН (другая длина/не только цифры)."""
+    digits = inn.strip()
+    if not digits.isdigit():
+        return None
+
+    if len(digits) == 12:
+        # ИНН физлица: n11 — контроль по первым 10 цифрам, n12 — по первым 11
+        coef_11 = [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]
+        coef_12 = [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]
+        n = [int(c) for c in digits]
+
+        check_11 = sum(n[i] * coef_11[i] for i in range(10)) % 11 % 10
+        check_12 = sum(n[i] * coef_12[i] for i in range(11)) % 11 % 10
+
+        return check_11 == n[10] and check_12 == n[11]
+
+    elif len(digits) == 10:
+        # ИНН организации: 1 контрольная цифра, считается по первым 9 цифрам
+        coef_10 = [2, 4, 10, 3, 5, 9, 4, 6, 8]
+        n = [int(c) for c in digits]
+
+        check_10 = sum(n[i] * coef_10[i] for i in range(9)) % 11 % 10
+        return check_10 == n[9]
+
+    return None
+
+
 def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
     """Конвертирует первую страницу PDF в PNG, ограничивая размер ~2000px по большей стороне."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -244,6 +274,16 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
         result = recognize_document(file_bytes, mime_type, fields, model)
         confidence = result.pop("_confidence", 50)
         print(f"[doc {doc_id}] confidence={confidence}, result={result}", flush=True)
+
+        # Проверка контрольной суммы ИНН (если есть поле, похожее на ИНН)
+        for field, value in result.items():
+            if "инн" in field.lower() and isinstance(value, str) and value.strip():
+                check = is_valid_inn(value)
+                if check is False:
+                    print(f"[doc {doc_id}] ВНИМАНИЕ: ИНН '{value}' не прошёл проверку контрольной суммы", flush=True)
+                    confidence = min(confidence, 50)
+                elif check is True:
+                    print(f"[doc {doc_id}] ИНН '{value}' прошёл проверку контрольной суммы", flush=True)
 
         result_fields = list(result.keys())
         empty_fields = [f for f in result_fields if not result.get(f)]
