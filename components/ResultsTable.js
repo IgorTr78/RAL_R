@@ -54,28 +54,20 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
   const [editingId, setEditingId] = useState(null)
   const [editValues, setEditValues] = useState({})
   const [savingId, setSavingId] = useState(null)
-  const [retryPickerId, setRetryPickerId] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
   const [previewUrls, setPreviewUrls] = useState({})
   const [previewLoading, setPreviewLoading] = useState(null)
 
   const RETRY_MODELS = [
-    { id: 'gpt-4o-mini',    label: 'GPT-4o mini' },
-    { id: 'gpt-4o',         label: 'GPT-4o' },
-    { id: 'GigaChat-2-Pro', label: 'GigaChat 2 Pro' },
-    { id: 'GigaChat-2-Max', label: 'GigaChat 2 Max' },
+    { id: 'gpt-4o-mini',    label: 'GPT-4o mini',     desc: 'быстро и дёшево' },
+    { id: 'gpt-4o',         label: 'GPT-4o',           desc: 'точнее, дороже' },
+    { id: 'GigaChat-2-Pro', label: 'GigaChat 2 Pro',  desc: 'Сбер, русский язык' },
+    { id: 'GigaChat-2-Max', label: 'GigaChat 2 Max',  desc: 'Сбер, максимум' },
   ]
 
   useEffect(() => {
     setLocalRows(rows)
   }, [rows])
-
-  useEffect(() => {
-    if (retryPickerId === null) return
-    const close = () => setRetryPickerId(null)
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [retryPickerId])
 
   const startEdit = (row) => {
     setEditingId(row.id)
@@ -137,7 +129,7 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
 
   const retryRecognition = async (row, model) => {
     try {
-      setRetryPickerId(null)
+      setExpandedId(null)
       setLocalRows(prev => prev.map(r =>
         r.id === row.id ? { ...r, status: 'pending' } : r
       ))
@@ -390,47 +382,20 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                           <Pencil size={12} />
                           {row.status === 'warning' || row.status === 'error' ? 'Исправить' : 'Изменить'}
                         </button>
-                        <div style={{ position: 'relative' }}>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setRetryPickerId(retryPickerId === row.id ? null : row.id) }}
-                            title="Распознать заново с выбором модели"
-                            style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              width: 28, height: 28, borderRadius: 6,
-                              border: '1.5px solid #E5E9E6', color: '#1C6B41',
-                              background: retryPickerId === row.id ? '#ECF6EF' : 'white', cursor: 'pointer',
-                            }}>
-                            <RefreshCw size={13} />
-                          </button>
-                          {retryPickerId === row.id && (
-                            <div style={{
-                              position: 'absolute', top: '110%', right: 0, zIndex: 10,
-                              background: 'white', borderRadius: 12,
-                              boxShadow: '0 4px 16px rgba(22,32,26,0.12), 0 0 0 1px rgba(22,32,26,0.06)',
-                              padding: 6, minWidth: 160,
-                            }}>
-                              <div style={{ fontSize: 10, fontWeight: 800, color: '#9CA6A0', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '6px 10px 4px' }}>
-                                Распознать с помощью
-                              </div>
-                              {RETRY_MODELS.map(m => (
-                                <button
-                                  key={m.id}
-                                  onClick={() => retryRecognition(row, m.id)}
-                                  style={{
-                                    display: 'block', width: '100%', textAlign: 'left',
-                                    fontSize: 13, padding: '7px 10px', borderRadius: 8,
-                                    border: 'none', background: 'transparent',
-                                    color: '#16201A', cursor: 'pointer', fontWeight: 600,
-                                  }}
-                                  onMouseEnter={(e) => e.currentTarget.style.background = '#F6F7F6'}
-                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                  {m.label}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setExpandedId(expandedId === `retry-${row.id}` ? null : `retry-${row.id}`)
+                          }}
+                          title="Распознать заново с выбором модели"
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 28, height: 28, borderRadius: 6,
+                            border: '1.5px solid #E5E9E6', color: '#1C6B41',
+                            background: expandedId === `retry-${row.id}` ? '#ECF6EF' : 'white', cursor: 'pointer',
+                          }}>
+                          <RefreshCw size={13} />
+                        </button>
                       </div>
                     )}
                   </td>
@@ -462,6 +427,36 @@ export default function ResultsTable({ fields = [], rows = [], taskName = '', ta
                             />
                           )
                         ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {expandedId === `retry-${row.id}` && (
+                  <tr>
+                    <td colSpan={fields.length + 5} style={{ padding: 0, borderBottom: '1.5px solid #F6F7F6', background: '#FAFBFA' }}>
+                      <div style={{ padding: '16px 24px' }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#9CA6A0', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                          Распознать заново с помощью
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          {RETRY_MODELS.map(m => (
+                            <button
+                              key={m.id}
+                              onClick={() => retryRecognition(row, m.id)}
+                              style={{
+                                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3,
+                                padding: '10px 16px', borderRadius: 12, flex: '1 1 160px',
+                                border: '1.5px solid #ECEFEC', background: 'white',
+                                cursor: 'pointer', textAlign: 'left',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#1C6B41'; e.currentTarget.style.background = '#ECF6EF' }}
+                              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#ECEFEC'; e.currentTarget.style.background = 'white' }}
+                            >
+                              <span style={{ fontSize: 13.5, fontWeight: 800, color: '#16201A', letterSpacing: '-0.01em' }}>{m.label}</span>
+                              <span style={{ fontSize: 12, color: '#9CA6A0', fontWeight: 500 }}>{m.desc}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </td>
                   </tr>
