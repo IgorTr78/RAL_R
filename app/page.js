@@ -5,6 +5,7 @@ import ParametersForm from '../components/ParametersForm'
 import TaskList from '../components/TaskList'
 import { supabase } from '../lib/supabaseClient'
 import { ScanText } from 'lucide-react'
+import JSZip from 'jszip'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +75,43 @@ export default function HomePage() {
     return () => clearInterval(interval)
   }, [tasks])
 
+  const ALLOWED_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp']
+
+  // Проверяет, выглядит ли имя файла "битым" (нечитаемые символы из-за проблем
+  // с кодировкой кириллицы в ZIP-архивах с Windows/macOS)
+  const isGarbledName = (name) => {
+    // Символы замены Unicode (U+FFFD) или управляющие/непечатаемые байты
+    return /\uFFFD|[\x00-\x08\x0E-\x1F]/.test(name)
+  }
+
+  // Распаковывает ZIP-файл в массив { name, blob } для поддерживаемых форматов
+  const extractZip = async (zipFile) => {
+    const zip = await JSZip.loadAsync(zipFile)
+    const result = []
+    let counter = 1
+
+    for (const [path, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue
+      let name = path.split('/').pop()
+      const ext = name.split('.').pop().toLowerCase()
+      if (!ALLOWED_EXTS.includes(ext)) continue
+      // Пропускаем системные файлы macOS
+      if (name.startsWith('.') || path.includes('__MACOSX')) continue
+
+      // Если имя файла "битое" (проблема с кодировкой кириллицы) — заменяем
+      // на безопасное, чтобы не показывать пользователю мусорные символы
+      if (isGarbledName(name)) {
+        name = `документ_${counter}.${ext}`
+      }
+      counter++
+
+      const blob = await entry.async('blob')
+      result.push({ name, blob })
+    }
+
+    return result
+  }
+
   const handleRecognize = async (fields, model) => {
     if (files.length === 0) {
       alert('Сначала выберите файл для загрузки')
@@ -82,25 +120,37 @@ export default function HomePage() {
     setLoading(true)
 
     try {
-      const file = files[0]
-      const ext = file.name.split('.').pop()
-      const safeName = `${Date.now()}.${ext}`
-      const filePath = safeName
+      const inputFile = files[0]
+      const inputExt = inputFile.name.split('.').pop().toLowerCase()
 
-      // 1. Загружаем файл в Storage
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file)
+      // Если это ZIP/RAR — распаковываем и собираем список документов
+      let documents = []
+      let taskFilename = inputFile.name
+      let taskFileSize = inputFile.size
 
-      if (uploadError) throw uploadError
+      if (inputExt === 'zip') {
+        const extracted = await extractZip(inputFile)
+        if (extracted.length === 0) {
+          throw new Error('В архиве не найдено поддерживаемых файлов (PDF, JPG, PNG, TIFF)')
+        }
+        documents = extracted.map(f => ({
+          file: f.blob,
+          name: f.name,
+          size: f.blob.size,
+        }))
+      } else if (inputExt === 'rar') {
+        throw new Error('Формат RAR пока не поддерживается. Используйте ZIP или загрузите файлы по одному.')
+      } else {
+        documents = [{ file: inputFile, name: inputFile.name, size: inputFile.size }]
+      }
 
-      // 2. Создаём запись задачи в БД
+      // 1. Создаём запись задачи в БД
       const { data: taskData, error: taskError } = await supabase
         .from('tasks')
         .insert({
-          filename: file.name,
-          file_size: file.size,
-          doc_count: files.length,
+          filename: taskFilename,
+          file_size: taskFileSize,
+          doc_count: documents.length,
           status: 'pending',
           fields: fields,
           model: model || 'gpt-4o-mini',
@@ -110,20 +160,31 @@ export default function HomePage() {
 
       if (taskError) throw taskError
 
-      // 3. Создаём запись документа, связанную с задачей
-      const { error: docError } = await supabase
-        .from('documents')
-        .insert({
-          task_id: taskData.id,
-          filename: file.name,
-          file_path: filePath,
-          file_size: file.size,
-          status: 'pending',
-        })
+      // 2. Загружаем каждый документ в Storage и создаём записи в БД
+      for (const doc of documents) {
+        const ext = doc.name.split('.').pop()
+        const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
 
-      if (docError) throw docError
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(safeName, doc.file)
 
-      // 4. Обновляем список задач
+        if (uploadError) throw uploadError
+
+        const { error: docError } = await supabase
+          .from('documents')
+          .insert({
+            task_id: taskData.id,
+            filename: doc.name,
+            file_path: safeName,
+            file_size: doc.size,
+            status: 'pending',
+          })
+
+        if (docError) throw docError
+      }
+
+      // 3. Обновляем список задач
       await loadTasks()
       await loadStats()
       setFiles([])
