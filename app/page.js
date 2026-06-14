@@ -118,7 +118,6 @@ export default function HomePage() {
       return
     }
     setLoading(true)
-    console.log('[handleRecognize] старт')
 
     try {
       const inputFile = files[0]
@@ -145,7 +144,6 @@ export default function HomePage() {
         documents = [{ file: inputFile, name: inputFile.name, size: inputFile.size }]
       }
 
-      console.log('[handleRecognize] документов для загрузки:', documents.length)
 
       // 1. Создаём запись задачи в БД
       const { data: taskData, error: taskError } = await supabase
@@ -162,21 +160,18 @@ export default function HomePage() {
         .single()
 
       if (taskError) throw taskError
-      console.log('[handleRecognize] задача создана, id=', taskData.id)
 
       // 2. Загружаем каждый документ в Storage и создаём записи в БД
       for (const doc of documents) {
         const ext = doc.name.split('.').pop()
         const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
 
-        console.log('[handleRecognize] загрузка файла:', doc.name, '->', safeName)
 
         const { error: uploadError } = await supabase.storage
           .from('documents')
           .upload(safeName, doc.file)
 
         if (uploadError) throw uploadError
-        console.log('[handleRecognize] файл загружен в storage:', safeName)
 
         const { error: docError } = await supabase
           .from('documents')
@@ -189,24 +184,18 @@ export default function HomePage() {
           })
 
         if (docError) throw docError
-        console.log('[handleRecognize] запись документа создана:', doc.name)
       }
 
-      console.log('[handleRecognize] все документы загружены, обновляем список задач')
 
       // 3. Обновляем список задач
       await loadTasks()
-      console.log('[handleRecognize] loadTasks завершён')
       await loadStats()
-      console.log('[handleRecognize] loadStats завершён')
       setFiles([])
-      console.log('[handleRecognize] готово')
     } catch (err) {
       console.error('[handleRecognize] Ошибка:', err)
       alert('Ошибка при загрузке: ' + err.message)
     } finally {
       setLoading(false)
-      console.log('[handleRecognize] finally: setLoading(false)')
     }
   }
 
@@ -306,7 +295,7 @@ export default function HomePage() {
         <div style={{ flex: 1, height: 0.5, background: '#E5E9E6' }} />
       </div>
 
-      <ParametersForm onSubmit={handleRecognize} loading={loading} />
+      <ParametersForm onSubmit={handleRecognize} loading={loading} files={files} />
 
       <p style={{
         fontSize: 11, fontWeight: 600, color: '#9CA6A0',
