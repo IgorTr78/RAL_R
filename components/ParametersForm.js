@@ -1,14 +1,16 @@
 'use client'
 import { useState } from 'react'
-import { ScanText, X } from 'lucide-react'
+import { ScanText, X, Loader2 } from 'lucide-react'
 
-export default function ParametersForm({ onSubmit, loading }) {
+export default function ParametersForm({ onSubmit, loading, files = [] }) {
   const [params, setParams] = useState('')
   const [model, setModel] = useState('gpt-4o-mini')
 
   const MODELS = [
-    { id: 'gpt-4o-mini', label: 'GPT-4o mini', desc: 'быстро и дёшево', price: '~$0.0003 / документ' },
-    { id: 'gpt-4o',      label: 'GPT-4o',      desc: 'точнее, дороже', price: '~$0.005 / документ' },
+    { id: 'gpt-4o-mini',      label: 'GPT-4o mini',      desc: 'быстро и дёшево',      price: '~$0.0003/документ' },
+    { id: 'gpt-4o',           label: 'GPT-4o',            desc: 'точнее, дороже',       price: '~$0.005/документ' },
+    { id: 'GigaChat-2-Pro',   label: 'GigaChat 2 Pro',   desc: 'Сбер, русский язык',   price: '~₽0.05/документ' },
+    { id: 'GigaChat-2-Max',   label: 'GigaChat 2 Max',   desc: 'Сбер, максимум',       price: '~₽0.15/документ' },
   ]
 
   const handleSubmit = () => {
@@ -19,6 +21,9 @@ export default function ParametersForm({ onSubmit, loading }) {
     if (fields.length === 0) return
     if (onSubmit) onSubmit(fields, model)
   }
+
+  const totalSizeMB = files.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)
+  const isLargeUpload = totalSizeMB > 5
 
   return (
     <div style={{
@@ -88,10 +93,10 @@ export default function ParametersForm({ onSubmit, loading }) {
                 {m.label}
                 <span style={{
                   fontSize: 10, fontWeight: 800, padding: '3px 9px', borderRadius: 7,
-                  background: i === 0 ? '#EAB308' : '#ECEFEC',
-                  color: i === 0 ? '#16201A' : '#9CA6A0',
+                  background: i === 0 ? '#EAB308' : i === 2 || i === 3 ? '#ECF6EF' : '#ECEFEC',
+                  color: i === 0 ? '#16201A' : i === 2 || i === 3 ? '#1C6B41' : '#9CA6A0',
                 }}>
-                  {i === 0 ? 'эконом' : 'точный'}
+                  {i === 0 ? 'эконом' : i === 1 ? 'точный' : i === 2 ? 'рус' : 'рус макс'}
                 </span>
               </span>
               <span style={{ fontSize: 12, color: '#9CA6A0', fontWeight: 500 }}>{m.desc} · {m.price}</span>
@@ -115,8 +120,8 @@ export default function ParametersForm({ onSubmit, loading }) {
             letterSpacing: '-0.01em',
           }}
         >
-          <ScanText size={15} />
-          {loading ? 'Распознавание...' : 'Распознать'}
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <ScanText size={15} />}
+          {loading ? 'Загрузка файлов...' : 'Распознать'}
         </button>
         <button
           onClick={() => setParams('')}
@@ -131,6 +136,20 @@ export default function ParametersForm({ onSubmit, loading }) {
           <X size={14} /> Очистить
         </button>
       </div>
+
+      {loading && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          marginTop: 12, padding: '10px 14px',
+          background: '#EBF0FE', borderRadius: 10,
+          fontSize: 12.5, color: '#3052D6', fontWeight: 600,
+        }}>
+          <Loader2 size={14} className="animate-spin" />
+          {isLargeUpload
+            ? `Загружаем файлы (~${totalSizeMB.toFixed(1)} МБ) — это может занять до минуты, зависит от скорости интернета`
+            : 'Загружаем файлы...'}
+        </div>
+      )}
     </div>
   )
 }
