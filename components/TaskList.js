@@ -50,6 +50,7 @@ export default function TaskList({ tasks = [], onRefresh, onDelete }) {
           Загрузок пока нет — загрузите первый документ выше
         </div>
       ) : (
+        <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
           <thead>
             <tr style={{ background: '#FAFBFA' }}>
@@ -59,6 +60,7 @@ export default function TaskList({ tasks = [], onRefresh, onDelete }) {
                   fontSize: 11, fontWeight: 700, color: '#9CA6A0',
                   letterSpacing: '0.08em', textTransform: 'uppercase',
                   borderBottom: '1.5px solid #F0F2F0',
+                  whiteSpace: 'nowrap',
                 }}>{h}</th>
               ))}
             </tr>
@@ -125,6 +127,7 @@ export default function TaskList({ tasks = [], onRefresh, onDelete }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )
