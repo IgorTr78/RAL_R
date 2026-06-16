@@ -87,7 +87,7 @@ def recognize_document_gigachat(file_bytes: bytes, mime_type: str, fields: list[
     # Загружаем изображение в GigaChat Files API, получаем file_id
     with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
         upload = giga.upload_file(("document.png", file_bytes, "image/png"))
-        file_id = upload.id
+        file_id = upload.id_
 
         prompt = (
             "Ты — система точного извлечения данных из официальных документов "
