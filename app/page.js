@@ -246,7 +246,7 @@ export default function HomePage() {
             }} />
           </div>
           <div>
-            <div style={{ fontSize: 19, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>DocRecognizer</div>
+            <div style={{ fontSize: 19, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>Росагролизинг_DocRecognizer</div>
             <div style={{ fontSize: 12.5, color: '#9CA6A0', fontWeight: 500, marginTop: 1 }}>Распознавание документов</div>
           </div>
         </div>
