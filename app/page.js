@@ -38,10 +38,11 @@ export default function HomePage() {
       .order('created_at', { ascending: false })
       .limit(8)
 
+    let mapped = []
     if (error) {
       console.error('Ошибка загрузки задач:', error)
     } else {
-      const mapped = data.map(t => ({
+      mapped = data.map(t => ({
         id: t.id,
         filename: t.filename,
         size: t.file_size ? (t.file_size / 1024).toFixed(0) + ' КБ' : '—',
@@ -50,10 +51,9 @@ export default function HomePage() {
         status: t.status,
       }))
       setTasks(mapped)
-      return mapped
     }
     if (!silent) setLoadingTasks(false)
-    return []
+    return mapped
   }
 
   useEffect(() => {
