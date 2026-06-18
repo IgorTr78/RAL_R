@@ -254,6 +254,165 @@ def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[st
     return json.loads(raw)
 
 
+def retry_inn_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> str | None:
+    """Повторно просит OpenAI перечитать конкретное поле ИНН, сообщив,
+    что контрольная сумма не сошлась. Возвращает исправленное значение или None."""
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
+    data_url = f"data:{mime_type};base64,{b64}"
+
+    prompt = (
+        f"На этом документе в поле \"{field_name}\" ты ранее распознал значение "
+        f"\"{wrong_value}\", но контрольная сумма ИНН по алгоритму ФНС не совпадает — "
+        "значит, как минимум одна цифра распознана неверно.\n\n"
+        "Посмотри на изображение ещё раз ОЧЕНЬ внимательно. Если цифры написаны "
+        "в отдельных клетках — считай каждую клетку по отдельности, слева направо, "
+        "не пытайся читать число целиком. Особое внимание удели цифрам, которые "
+        "легко спутать: 0/8, 1/7, 3/8, 6/5, 8/9, 8/6.\n\n"
+        "Ответь СТРОГО в формате JSON без markdown: "
+        '{"value": "<исправленное значение, только цифры>"}. '
+        "Если после повторной проверки ты получаешь то же самое значение и уверен "
+        'в нём — верни его же.'
+    )
+
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
+            ],
+        }],
+        max_tokens=200,
+        temperature=0,
+    )
+
+    raw = response.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        result = json.loads(raw)
+        return result.get("value")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def retry_inn_gigachat(file_bytes: bytes, field_name: str, wrong_value: str, model: str) -> str | None:
+    """Аналог retry_inn_openai, но через GigaChat."""
+    from gigachat import GigaChat
+    from gigachat.models import Chat, Messages, MessagesRole
+
+    with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+        upload = giga.upload_file(("document.png", file_bytes, "image/png"))
+        file_id = upload.id_
+
+        prompt = (
+            f"На этом документе в поле \"{field_name}\" ты ранее распознал значение "
+            f"\"{wrong_value}\", но контрольная сумма ИНН по алгоритму ФНС не совпадает — "
+            "значит, как минимум одна цифра распознана неверно.\n\n"
+            "Посмотри на изображение ещё раз ОЧЕНЬ внимательно. Если цифры написаны "
+            "в отдельных клетках — считай каждую клетку по отдельности, слева направо. "
+            "Особое внимание удели цифрам, которые легко спутать: 0/8, 1/7, 3/8, 6/5, 8/9.\n\n"
+            "Ответь СТРОГО в формате JSON без markdown: "
+            '{"value": "<исправленное значение, только цифры>"}.'
+        )
+
+        payload = Chat(
+            model=model,
+            messages=[Messages(role=MessagesRole.USER, content=prompt, attachments=[file_id])],
+            temperature=0,
+            max_tokens=200,
+        )
+
+        response = giga.chat(payload)
+        raw = response.choices[0].message.content.strip()
+
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        result = json.loads(raw)
+        return result.get("value")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+INN_CONFUSABLE_DIGITS = {
+    "0": ["8"], "8": ["0", "9", "6", "3"], "1": ["7"], "7": ["1"],
+    "3": ["8"], "6": ["5"], "5": ["6"], "9": ["8"],
+}
+
+
+def find_inn_correction_candidate(wrong_value: str) -> str | None:
+    """Перебирает варианты замены 1-2 'спутываемых' цифр в ИНН и ищет
+    единственный вариант с правильной контрольной суммой.
+    Возвращает кандидата, если он единственный, иначе None."""
+    digits = wrong_value.strip()
+    if not digits.isdigit() or len(digits) not in (10, 12):
+        return None
+
+    candidates = set()
+
+    # Перебор замены ровно одной позиции
+    for i, d in enumerate(digits):
+        for alt in INN_CONFUSABLE_DIGITS.get(d, []):
+            candidate = digits[:i] + alt + digits[i + 1:]
+            if is_valid_inn(candidate) is True:
+                candidates.add(candidate)
+
+    # Если на одной позиции не нашли — пробуем пары позиций (1-2 цифры спутаны)
+    if not candidates:
+        for i in range(len(digits)):
+            for alt_i in INN_CONFUSABLE_DIGITS.get(digits[i], []):
+                base = digits[:i] + alt_i + digits[i + 1:]
+                for j in range(i + 1, len(digits)):
+                    for alt_j in INN_CONFUSABLE_DIGITS.get(digits[j], []):
+                        candidate = base[:j] + alt_j + base[j + 1:]
+                        if is_valid_inn(candidate) is True:
+                            candidates.add(candidate)
+
+    if len(candidates) == 1:
+        return candidates.pop()
+    return None
+
+
+def attempt_inn_correction(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> tuple[str | None, bool]:
+    """Пытается исправить невалидный ИНН: сначала retry-запросом к модели,
+    затем (если не помогло) перебором спутываемых цифр.
+    Возвращает (исправленное_значение_или_None, найдено_уверенно)."""
+
+    # Шаг 1: повторный запрос к модели с обратной связью
+    try:
+        if model.startswith("GigaChat"):
+            retried = retry_inn_gigachat(file_bytes, field_name, wrong_value, model)
+        else:
+            retried = retry_inn_openai(file_bytes, mime_type, field_name, wrong_value, model)
+    except Exception as e:
+        print(f"[inn_retry] ошибка повторного запроса: {e}", flush=True)
+        retried = None
+
+    if retried and is_valid_inn(retried) is True:
+        print(f"[inn_retry] retry успешен: '{wrong_value}' -> '{retried}'", flush=True)
+        return retried, True
+
+    # Шаг 2: перебор соседних/спутываемых цифр у исходного (или переспрошенного) значения
+    for candidate_source in filter(None, [wrong_value, retried]):
+        fixed = find_inn_correction_candidate(candidate_source)
+        if fixed:
+            print(f"[inn_retry] найден кандидат перебором: '{candidate_source}' -> '{fixed}'", flush=True)
+            return fixed, True
+
+    print(f"[inn_retry] не удалось исправить ИНН '{wrong_value}'", flush=True)
+    return None, False
+
+
 def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
     doc_id = doc["id"]
     file_path = doc["file_path"]
@@ -275,13 +434,20 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
         confidence = result.pop("_confidence", 50)
         print(f"[doc {doc_id}] confidence={confidence}, result={result}", flush=True)
 
-        # Проверка контрольной суммы ИНН (если есть поле, похожее на ИНН)
-        for field, value in result.items():
+        # Проверка контрольной суммы ИНН с попыткой самокоррекции
+        for field in list(result.keys()):
+            value = result[field]
             if "инн" in field.lower() and isinstance(value, str) and value.strip():
                 check = is_valid_inn(value)
                 if check is False:
-                    print(f"[doc {doc_id}] ВНИМАНИЕ: ИНН '{value}' не прошёл проверку контрольной суммы", flush=True)
-                    confidence = min(confidence, 50)
+                    print(f"[doc {doc_id}] ВНИМАНИЕ: ИНН '{value}' не прошёл проверку контрольной суммы, пытаюсь исправить", flush=True)
+                    fixed, confident = attempt_inn_correction(file_bytes, mime_type, field, value, model)
+                    if fixed:
+                        result[field] = fixed
+                        print(f"[doc {doc_id}] ИНН исправлен: '{value}' -> '{fixed}'", flush=True)
+                        confidence = max(confidence, 75) if confident else confidence
+                    else:
+                        confidence = min(confidence, 50)
                 elif check is True:
                     print(f"[doc {doc_id}] ИНН '{value}' прошёл проверку контрольной суммы", flush=True)
 
