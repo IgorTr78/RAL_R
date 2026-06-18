@@ -64,6 +64,42 @@ def is_valid_inn(inn: str) -> bool | None:
     return None
 
 
+def is_plausible_russian_name(word: str, is_patronymic: bool = False) -> bool:
+    """Эвристическая проверка, похоже ли слово на настоящее русское имя/фамилию/отчество.
+    Не использует словарь — только структурные признаки, по которым обычно
+    отличаются реальные слова от OCR-мусора."""
+    w = word.strip()
+    if len(w) < 2:
+        return False
+
+    # Должна быть только кириллица (плюс дефис для двойных имён/фамилий)
+    if not all(c.isalpha() and ('а' <= c.lower() <= 'я' or c.lower() == 'ё') or c == '-' for c in w):
+        return False
+
+    # Отчества почти всегда заканчиваются на одно из этих окончаний
+    if is_patronymic:
+        valid_endings = ('ович', 'евич', 'овна', 'евна', 'ич', 'инична')
+        if not w.lower().endswith(valid_endings):
+            return False
+
+    # Не должно быть трёх одинаковых букв подряд или трёх согласных подряд без гласной —
+    # частый признак ошибки OCR, а не реального слова
+    vowels = set('аеёиоуыэюя')
+    consecutive_consonants = 0
+    for c in w.lower():
+        if c == '-':
+            consecutive_consonants = 0
+            continue
+        if c in vowels:
+            consecutive_consonants = 0
+        else:
+            consecutive_consonants += 1
+            if consecutive_consonants >= 4:
+                return False
+
+    return True
+
+
 def pdf_first_page_to_png(pdf_bytes: bytes) -> bytes:
     """Конвертирует первую страницу PDF в PNG, ограничивая размер ~2000px по большей стороне."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -413,6 +449,114 @@ def attempt_inn_correction(file_bytes: bytes, mime_type: str, field_name: str, w
     return None, False
 
 
+def retry_name_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> str | None:
+    """Повторно просит OpenAI перечитать конкретное поле ФИО по буквам.
+    Возвращает исправленное значение или None."""
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
+    data_url = f"data:{mime_type};base64,{b64}"
+
+    prompt = (
+        f"На этом документе в поле \"{field_name}\" ты ранее распознал значение "
+        f"\"{wrong_value}\", но это слово не похоже на реально существующее русское "
+        "имя, фамилию или отчество — вероятно, одна или несколько букв распознаны неверно.\n\n"
+        "Посмотри на изображение ещё раз ОЧЕНЬ внимательно, прочитай слово по буквам "
+        "слева направо, не угадывая по общему виду. Учти типичные ошибки OCR: "
+        "путаница рукописных/печатных букв н/п, и/й, ш/щ, ц/щ, о/а, е/ё, и/ы.\n\n"
+        "Ответь СТРОГО в формате JSON без markdown: "
+        '{"value": "<исправленное значение>"}.'
+    )
+
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
+            ],
+        }],
+        max_tokens=200,
+        temperature=0,
+    )
+
+    raw = response.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        result = json.loads(raw)
+        return result.get("value")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def retry_name_gigachat(file_bytes: bytes, field_name: str, wrong_value: str, model: str) -> str | None:
+    """Аналог retry_name_openai, но через GigaChat."""
+    from gigachat import GigaChat
+    from gigachat.models import Chat, Messages, MessagesRole
+
+    with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+        upload = giga.upload_file(("document.png", file_bytes, "image/png"))
+        file_id = upload.id_
+
+        prompt = (
+            f"На этом документе в поле \"{field_name}\" ты ранее распознал значение "
+            f"\"{wrong_value}\", но это слово не похоже на реально существующее русское "
+            "имя, фамилию или отчество — вероятно, одна или несколько букв распознаны неверно.\n\n"
+            "Посмотри на изображение ещё раз ОЧЕНЬ внимательно, прочитай слово по буквам "
+            "слева направо. Учти типичные ошибки OCR: путаница рукописных/печатных букв "
+            "н/п, и/й, ш/щ, ц/щ, о/а, е/ё, и/ы.\n\n"
+            "Ответь СТРОГО в формате JSON без markdown: "
+            '{"value": "<исправленное значение>"}.'
+        )
+
+        payload = Chat(
+            model=model,
+            messages=[Messages(role=MessagesRole.USER, content=prompt, attachments=[file_id])],
+            temperature=0,
+            max_tokens=200,
+        )
+
+        response = giga.chat(payload)
+        raw = response.choices[0].message.content.strip()
+
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        result = json.loads(raw)
+        return result.get("value")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def attempt_name_correction(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str, is_patronymic: bool) -> tuple[str | None, bool]:
+    """Пытается исправить неправдоподобное имя/фамилию/отчество повторным запросом
+    к модели с указанием перечитать слово по буквам.
+    Возвращает (исправленное_значение_или_None, найдено_уверенно)."""
+    try:
+        if model.startswith("GigaChat"):
+            retried = retry_name_gigachat(file_bytes, field_name, wrong_value, model)
+        else:
+            retried = retry_name_openai(file_bytes, mime_type, field_name, wrong_value, model)
+    except Exception as e:
+        print(f"[name_retry] ошибка повторного запроса: {e}", flush=True)
+        retried = None
+
+    if retried and is_plausible_russian_name(retried, is_patronymic):
+        print(f"[name_retry] retry успешен: '{wrong_value}' -> '{retried}'", flush=True)
+        return retried, True
+
+    print(f"[name_retry] не удалось уверенно исправить '{wrong_value}'", flush=True)
+    return None, False
+
+
 def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
     doc_id = doc["id"]
     file_path = doc["file_path"]
@@ -450,6 +594,28 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
                         confidence = min(confidence, 50)
                 elif check is True:
                     print(f"[doc {doc_id}] ИНН '{value}' прошёл проверку контрольной суммы", flush=True)
+
+        # Проверка правдоподобности ФИО с попыткой самокоррекции
+        for field in list(result.keys()):
+            value = result[field]
+            field_lower = field.lower()
+            is_name_like = any(kw in field_lower for kw in ["имя", "фамилия", "отчество", "фио"])
+            if is_name_like and isinstance(value, str) and value.strip():
+                is_patronymic = "отчество" in field_lower
+                # Для составных полей "ФИО" (несколько слов) проверяем только если это одно слово —
+                # отдельная разбивка на части здесь не делается, чтобы не плодить ложные срабатывания
+                words_to_check = value.split() if "фио" in field_lower else [value]
+                plausible = all(is_plausible_russian_name(w, is_patronymic) for w in words_to_check)
+
+                if not plausible:
+                    print(f"[doc {doc_id}] ВНИМАНИЕ: значение '{value}' в поле '{field}' не похоже на реальное имя, пытаюсь исправить", flush=True)
+                    fixed, confident = attempt_name_correction(file_bytes, mime_type, field, value, model, is_patronymic)
+                    if fixed:
+                        result[field] = fixed
+                        print(f"[doc {doc_id}] значение исправлено: '{value}' -> '{fixed}'", flush=True)
+                        confidence = max(confidence, 75) if confident else confidence
+                    else:
+                        confidence = min(confidence, 60)
 
         result_fields = list(result.keys())
         empty_fields = [f for f in result_fields if not result.get(f)]
