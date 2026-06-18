@@ -387,23 +387,32 @@ INN_CONFUSABLE_DIGITS = {
 
 
 def find_inn_correction_candidate(wrong_value: str) -> str | None:
-    """Перебирает варианты замены 1-2 'спутываемых' цифр в ИНН и ищет
-    единственный вариант с правильной контрольной суммой.
-    Возвращает кандидата, если он единственный, иначе None."""
+    """Перебирает варианты замены 1-2 'спутываемых' цифр и перестановки
+    соседних цифр в ИНН, ищет единственный вариант с правильной контрольной
+    суммой. Возвращает кандидата, если он единственный, иначе None."""
     digits = wrong_value.strip()
     if not digits.isdigit() or len(digits) not in (10, 12):
         return None
 
     candidates = set()
 
-    # Перебор замены ровно одной позиции
+    # Перебор замены ровно одной позиции (спутанные по виду цифры: 0/8, 1/7 и т.п.)
     for i, d in enumerate(digits):
         for alt in INN_CONFUSABLE_DIGITS.get(d, []):
             candidate = digits[:i] + alt + digits[i + 1:]
             if is_valid_inn(candidate) is True:
                 candidates.add(candidate)
 
-    # Если на одной позиции не нашли — пробуем пары позиций (1-2 цифры спутаны)
+    # Перебор перестановки каждой пары соседних цифр — частая ошибка при
+    # считывании клетчатых полей ИНН (например, 13 вместо 31)
+    for i in range(len(digits) - 1):
+        if digits[i] == digits[i + 1]:
+            continue  # перестановка одинаковых цифр ничего не меняет
+        swapped = digits[:i] + digits[i + 1] + digits[i] + digits[i + 2:]
+        if is_valid_inn(swapped) is True:
+            candidates.add(swapped)
+
+    # Если ничего не нашли — пробуем пары позиций с заменой похожих цифр
     if not candidates:
         for i in range(len(digits)):
             for alt_i in INN_CONFUSABLE_DIGITS.get(digits[i], []):
