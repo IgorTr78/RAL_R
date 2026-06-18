@@ -30,8 +30,8 @@ export default function HomePage() {
     })
   }
 
-  const loadTasks = async () => {
-    setLoadingTasks(true)
+  const loadTasks = async (silent = false) => {
+    if (!silent) setLoadingTasks(true)
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
@@ -50,13 +50,28 @@ export default function HomePage() {
         status: t.status,
       }))
       setTasks(mapped)
+      return mapped
     }
-    setLoadingTasks(false)
+    if (!silent) setLoadingTasks(false)
+    return []
   }
 
   useEffect(() => {
-    loadStats()
-    loadTasks()
+    let cancelled = false
+
+    const tick = async () => {
+      await loadStats()
+      const mapped = await loadTasks(true)
+      setLoadingTasks(false)
+
+      const hasActive = mapped.some(t => t.status === 'pending' || t.status === 'processing')
+      if (!cancelled && hasActive) {
+        setTimeout(tick, 5000)
+      }
+    }
+
+    tick()
+    return () => { cancelled = true }
   }, [])
 
   const handleDelete = async (taskId) => {
