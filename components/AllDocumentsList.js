@@ -76,8 +76,8 @@ export default function AllDocumentsList() {
   const [selectedIds, setSelectedIds] = useState(new Set())
   const router = useRouter()
 
-  const load = async () => {
-    setLoading(true)
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true)
 
     const { data: docs, error } = await supabase
       .from('documents')
@@ -86,7 +86,7 @@ export default function AllDocumentsList() {
 
     if (error) {
       console.error('Ошибка загрузки документов:', error)
-      setLoading(false)
+      if (!silent) setLoading(false)
       return
     }
 
@@ -112,18 +112,18 @@ export default function AllDocumentsList() {
       source: d.source || 'веб-форма',
       created_at: d.created_at,
     })))
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
 
   useEffect(() => {
     load()
   }, [])
 
-  // Автообновление, если есть документы в очереди/обработке
+  // Автообновление, если есть документы в очереди/обработке — без мигания спиннером
   useEffect(() => {
     const hasActive = rows.some(r => r.status === 'pending' || r.status === 'processing')
     if (!hasActive) return
-    const interval = setInterval(load, 5000)
+    const interval = setInterval(() => load(true), 5000)
     return () => clearInterval(interval)
   }, [rows])
 
