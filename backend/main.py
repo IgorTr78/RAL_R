@@ -4,6 +4,7 @@ import base64
 import asyncio
 import difflib
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import fitz  # PyMuPDF
 from fastapi import FastAPI
@@ -934,9 +935,11 @@ def recognize_leasing_doc(file_bytes: bytes, mime_type: str, model: str) -> dict
 
 
 def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini", template_name: str = None):
+    import time
     doc_id = doc["id"]
     file_path = doc["file_path"]
     filename = doc["filename"]
+    started_at = time.time()
 
     try:
         print(f"[doc {doc_id}] начало обработки: {filename}, path={file_path}", flush=True)
@@ -1077,11 +1080,15 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini", t
         else:
             status = "warning"
 
+        elapsed = round(time.time() - started_at, 1)
+        print(f"[doc {doc_id}] обработка завершена за {elapsed}с, статус={status}", flush=True)
+
         supabase.table("documents").update({
             "values": result,
             "confidence": confidence,
             "status": status,
             "error_message": None,
+            "processed_at": datetime.utcnow().isoformat(),
         }).eq("id", doc_id).execute()
 
         return status
