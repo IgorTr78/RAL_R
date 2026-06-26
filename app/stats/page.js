@@ -13,7 +13,7 @@ export default function StatsPage() {
     const load = async () => {
       setLoading(true)
       const [{ data: docsData, error: docsErr }, { data: tasksData, error: tasksErr }] = await Promise.all([
-        supabase.from('documents').select('status, confidence, model, source, created_at'),
+        supabase.from('documents').select('status, confidence, model, source, created_at, processed_at'),
         supabase.from('tasks').select('status, created_at, model'),
       ])
       if (docsErr) console.error('Ошибка загрузки документов:', docsErr)
@@ -35,6 +35,21 @@ export default function StatsPage() {
   const avgConfidence = withConfidence.length
     ? (withConfidence.reduce((sum, d) => sum + d.confidence, 0) / withConfidence.length)
     : null
+
+  // Среднее время обработки — только по документам у которых есть processed_at
+  const withTime = docs.filter(d => d.processed_at && d.created_at)
+  const avgProcessingSeconds = withTime.length
+    ? withTime.reduce((sum, d) => {
+        const sec = (new Date(d.processed_at) - new Date(d.created_at)) / 1000
+        return sum + sec
+      }, 0) / withTime.length
+    : null
+
+  const formatTime = (sec) => {
+    if (sec === null) return '—'
+    if (sec < 60) return `${sec.toFixed(1)}с`
+    return `${(sec / 60).toFixed(1)}мин`
+  }
 
   const byModel = {}
   docs.forEach(d => {
@@ -111,6 +126,38 @@ export default function StatsPage() {
           <div style={labelStyle}>Доля успешных</div>
           <div style={valueStyle('#1C6B41')}>
             {total > 0 ? `${((ok / total) * 100).toFixed(1)}%` : '—'}
+          </div>
+        </div>
+      </div>
+
+      <p style={{
+        fontSize: 11, fontWeight: 600, color: '#9CA6A0',
+        textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
+      }}>
+        Производительность
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 28 }}>
+        <div style={cardStyle}>
+          <div style={labelStyle}>Среднее время обработки</div>
+          <div style={valueStyle('#16201A')}>{formatTime(avgProcessingSeconds)}</div>
+          <div style={{ fontSize: 11, color: '#9CA6A0', marginTop: 6 }}>
+            {withTime.length > 0 ? `по ${withTime.length} документам` : 'нет данных'}
+          </div>
+        </div>
+        <div style={cardStyle}>
+          <div style={labelStyle}>Мин. время</div>
+          <div style={valueStyle('#1C6B41')}>
+            {withTime.length > 0
+              ? formatTime(Math.min(...withTime.map(d => (new Date(d.processed_at) - new Date(d.created_at)) / 1000)))
+              : '—'}
+          </div>
+        </div>
+        <div style={cardStyle}>
+          <div style={labelStyle}>Макс. время</div>
+          <div style={valueStyle('#92400E')}>
+            {withTime.length > 0
+              ? formatTime(Math.max(...withTime.map(d => (new Date(d.processed_at) - new Date(d.created_at)) / 1000)))
+              : '—'}
           </div>
         </div>
       </div>
