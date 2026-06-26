@@ -1142,7 +1142,11 @@ def process_pending_tasks():
         else:
             final_status = "done"  # все warning — результаты есть, но требуют проверки
 
-        supabase.table("tasks").update({"status": final_status}).eq("id", task_id).execute()
+        completed_at = datetime.utcnow().isoformat()
+        supabase.table("tasks").update({
+            "status": final_status,
+            "completed_at": completed_at,
+        }).eq("id", task_id).execute()
 
         # Перекрёстная сверка имён между документами одной задачи
         if final_status in ("done", "partial") and len(documents) >= 2:
