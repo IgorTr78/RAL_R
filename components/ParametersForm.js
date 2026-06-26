@@ -114,7 +114,7 @@ export default function ParametersForm({ onSubmit, loading, files = [] }) {
 
   const handleSubmit = () => {
     if (selectedFields.length === 0) return
-    if (onSubmit) onSubmit(selectedFields, model)
+    if (onSubmit) onSubmit(selectedFields, model, activeTemplateObj?.name || null)
   }
 
   const totalSizeMB = files.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)
