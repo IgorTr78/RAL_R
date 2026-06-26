@@ -15,12 +15,15 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 GIGACHAT_CREDENTIALS = os.environ.get("GIGACHAT_CREDENTIALS", "")
+QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
+QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 POLL_INTERVAL_SECONDS = 10
 STORAGE_BUCKET = "documents"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+qwen_client = OpenAI(api_key=QWEN_API_KEY, base_url=QWEN_BASE_URL) if QWEN_API_KEY else None
 
 
 def guess_mime_type(filename: str) -> str:
@@ -183,15 +186,31 @@ def recognize_document_gigachat(file_bytes: bytes, mime_type: str, fields: list[
     return json.loads(raw)
 
 
+def recognize_document_qwen(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "qwen-vl-plus") -> dict:
+    """Отправляет документ в Qwen (через DashScope, OpenAI-совместимый API)."""
+    if qwen_client is None:
+        raise RuntimeError(
+            "QWEN_API_KEY не задан в переменных окружения — невозможно использовать модель Qwen"
+        )
+    return recognize_document_openai(file_bytes, mime_type, fields, model, client=qwen_client)
+
+
 def recognize_document(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini") -> dict:
-    """Роутер: выбирает OpenAI или GigaChat в зависимости от модели."""
+    """Роутер: выбирает OpenAI, GigaChat или Qwen в зависимости от модели."""
     if model.startswith("GigaChat"):
         return recognize_document_gigachat(file_bytes, mime_type, fields, model)
+    if model.startswith("qwen"):
+        return recognize_document_qwen(file_bytes, mime_type, fields, model)
     return recognize_document_openai(file_bytes, mime_type, fields, model)
 
 
-def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini") -> dict:
-    """Отправляет документ в OpenAI и просит извлечь указанные поля."""
+def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[str], model: str = "gpt-4o-mini", client: OpenAI = None) -> dict:
+    """Отправляет документ в OpenAI-совместимый API и просит извлечь указанные поля.
+    Параметр client позволяет переиспользовать эту же функцию для любого
+    OpenAI-совместимого провайдера (например, Qwen через DashScope)."""
+    if client is None:
+        client = openai_client
+
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
 
@@ -200,70 +219,44 @@ def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[st
     field_list = "\n".join(f"- {f}" for f in all_fields)
 
     prompt = (
-        "Ты — система точного извлечения данных из официальных документов "
-        "(справки, свидетельства, счета, договоры).\n\n"
+        "Ты — система точного извлечения данных из официальных документов.\n\n"
         "Извлеки следующие поля:\n"
         f"{field_list}\n\n"
-        "ОПРЕДЕЛЕНИЕ ВИДА ДОКУМЕНТА:\n"
-        "Поле \"Вид документа\" должно содержать краткое и точное название типа "
-        "документа на основе его заголовка, структуры и печатей, например: "
-        "\"Паспорт РФ\", \"Свидетельство ИНН\", \"Счёт на оплату\", "
-        "\"Акт выполненных работ\", \"Договор поставки\", \"Товарная накладная\", "
-        "\"Доверенность\", \"СТС\" (свидетельство о регистрации ТС), "
-        "\"ПТС\" (паспорт транспортного средства) и т.п. "
-        "Если тип определить невозможно — напиши \"Неизвестный документ\".\n\n"
-        "ПРАВИЛА ЧТЕНИЯ ЧИСЕЛ И КОДОВ:\n"
-        "- ИНН, СНИЛС: если на документе цифры написаны в отдельных клетках, "
-        "разделённых вертикальными линиями (типичное оформление полей ИНН/СНИЛС) — "
-        "распознавай КАЖДУЮ КЛЕТКУ ПО ОТДЕЛЬНОСТИ, как изолированный символ, "
-        "слева направо, и только затем объединяй в одну строку без пробелов. "
-        "Не пытайся читать число целиком \"на глаз\" — анализируй клетку за клеткой. "
-        "Для ИНН физлица должно получиться РОВНО 12 цифр, для ИНН организации — РОВНО 10. "
-        "Если итоговое количество цифр не совпадает с ожидаемым — пересчитай клетки ещё раз.\n"
-        "- VIN-номер автомобиля — строго 17 символов (латиница и цифры), читай "
-        "также как одну непрерывную строку без пробелов.\n"
-        "- НОМЕР ДОКУМЕНТА (поле \"Номер документа\", \"Номер свидетельства\" и "
-        "подобные): если рядом с номером на документе указана СЕРИЯ (например, "
-        "\"серия 50 № 002880829\"), включи в значение поля ВСЮ строку целиком, "
-        "включая слово \"серия\", номер серии, символ № и сам номер — "
-        "например \"серия 50 № 002880829\", а не только \"002880829\".\n"
-        "- Для остальных номеров и серий (например, серия и номер паспорта, "
-        "номер бланка, договора) — сохраняй ТОЧНО тот формат, "
-        "в котором они написаны на документе, включая пробелы между группами цифр. "
-        "Например, если на документе написано \"46 23 482794\", в ответе должно "
-        "быть именно \"46 23 482794\", а не \"4623482794\".\n"
-        "- Не путай похожие цифры: 0 и О, 1 и 7, 3 и 8, 5 и 6 — внимательно "
-        "сверяй форму каждого символа.\n"
-        "- Перепроверь результат, сверив его с изображением ещё раз перед ответом. "
-        "Для ИНН и СНИЛС сделай эту проверку дважды: посчитай цифры по клеткам "
-        "заново и сравни с первым результатом — если они отличаются, выбери "
-        "вариант, который ты видишь яснее на изображении.\n\n"
-        "ПРОВЕРКА ИМЁН:\n"
-        "Если среди полей есть \"Имя\", \"Фамилия\" или \"Отчество\" (или похожие "
-        "по смыслу поля, например \"ФИО\", \"На кого выдан\"), проверяй каждое "
-        "распознанное слово на правдоподобность как настоящее русское имя/отчество:\n"
-        "- Отчества обычно заканчиваются на \"-ович\"/\"-евич\" (мужские) или "
-        "\"-овна\"/\"-евна\" (женские).\n"
-        "- Если распознанное слово не похоже на реальное существующее имя или "
-        "отчество (вероятная ошибка OCR — например, спутаны буквы), исправь его "
-        "на наиболее близкое по написанию реально существующее русское имя или "
-        "отчество, которое лучше соответствует изображению.\n"
-        "- Если совпадений не находится и слово выглядит правдоподобно — "
-        "оставь как распознано.\n"
-        "- КРИТИЧЕСКИ ВАЖНО: если ты не можешь с уверенностью на 100% сказать, "
-        "что распознанное \"Отчество\" является реально существующим русским "
-        "отчеством (даже после попытки исправления) — установи значение "
-        "\"_confidence\" не выше 60, независимо от качества распознавания "
-        "остальных полей. Лучше показать документ пользователю на проверку, "
-        "чем выдать неверное отчество с высокой уверенностью.\n\n"
-        "Ответь СТРОГО в формате JSON, без markdown и пояснений. "
-        "Ключи JSON должны точно совпадать с названиями полей выше. "
-        "Если поле не найдено на документе — используй пустую строку \"\". "
+        "Правила:\n"
+        "1. Вид документа — краткое название: Паспорт РФ, Свидетельство ИНН, СТС, ПТС и т.п.\n"
+        "2. ФИО — полное имя человека (обычно написано крупно или подчёркнуто).\n"
+        "3. Номер ИНН — цифры в рамке рядом со словом ИНН. "
+        "Читай каждую клетку отдельно слева направо, объединяй без пробелов. "
+        "Физлицо = 12 цифр, юрлицо = 10 цифр. Не путай: 0/О, 1/7, 3/8.\n"
+        "4. Дата выдачи — дата выдачи или постановки на учёт на документе.\n"
+        "5. Номер документа — серия и номер в формате: серия XX № XXXXXXXXX.\n"
+        "6. Название документа — официальное название: Сертификат соответствия, Паспорт РФ и т.п.\n"
+        "7. Номер сертификата — строка вида 'RU C-RU.ПФ02.В.08637/24' рядом со знаком № ЕАЭС.\n"
+        "8. Номер бланка — серия и номер бланка, вида 'Серия RU № 0506887'.\n"
+        "9. Срок действия — диапазон дат: дата начала и дата окончания через 'по', "
+        "например '19.07.2024 по 18.07.2029'. Если конечная дата перекрыта печатью — "
+        "попробуй прочитать цифры сквозь печать.\n"
+        "10. Тип документа — полное официальное название документа как написано в заголовке, "
+        "например: 'Акт приема-передачи Предмета лизинга по договору финансовой аренды (лизинга)'.\n"
+        "11. Дата документа — дата в документе, формат ДД.ММ.ГГГГ или ДД месяц ГГГГ г.\n"
+        "12. Номер договора — номер договора лизинга или купли-продажи, "
+        "обычно после слов '№', 'договор №', 'по договору'.\n"
+        "13. Если название поля не совпадает с текстом на документе — ищи по смыслу.\n"
+        "14. Если поле не найдено — верни пустую строку.\n\n"
         "Также добавь ключ \"_confidence\" — целое число от 0 до 100, "
-        "отражающее общую уверенность распознавания."
+        "отражающее общую уверенность распознавания.\n\n"
+        "ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА ДЛЯ ИНН:\n"
+        "- Если цифры написаны в отдельных клетках — считай каждую клетку по отдельности слева направо.\n"
+        "- Перепроверь ИНН дважды: посчитай цифры по клеткам заново и сравни с первым результатом.\n"
+        "- Для ИНН физлица должно получиться РОВНО 12 цифр, для ИНН организации — РОВНО 10.\n\n"
+        "ПРОВЕРКА ИМЁН:\n"
+        "- Отчества обычно заканчиваются на -ович/-евич (мужские) или -овна/-евна (женские).\n"
+        "- Если слово не похоже на реальное имя/отчество — исправь на близкое по написанию реально существующее.\n\n"
+        "Ответь СТРОГО в формате JSON без markdown и пояснений. "
+        "Ключи JSON должны точно совпадать с названиями полей выше."
     )
 
-    response = openai_client.chat.completions.create(
+    response = client.chat.completions.create(
         model=model,
         messages=[
             {
@@ -290,9 +283,12 @@ def recognize_document_openai(file_bytes: bytes, mime_type: str, fields: list[st
     return json.loads(raw)
 
 
-def retry_inn_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> str | None:
-    """Повторно просит OpenAI перечитать конкретное поле ИНН, сообщив,
-    что контрольная сумма не сошлась. Возвращает исправленное значение или None."""
+def retry_inn_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str, client: OpenAI = None) -> str | None:
+    """Повторно просит OpenAI-совместимую модель перечитать конкретное поле ИНН,
+    сообщив, что контрольная сумма не сошлась. Возвращает исправленное значение или None."""
+    if client is None:
+        client = openai_client
+
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
 
@@ -310,7 +306,7 @@ def retry_inn_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_v
         'в нём — верни его же.'
     )
 
-    response = openai_client.chat.completions.create(
+    response = client.chat.completions.create(
         model=model,
         messages=[{
             "role": "user",
@@ -428,6 +424,18 @@ def find_inn_correction_candidate(wrong_value: str) -> str | None:
     return None
 
 
+def get_openai_compatible_client(model: str) -> OpenAI:
+    """Возвращает подходящий OpenAI-совместимый клиент в зависимости от модели
+    (обычный OpenAI или Qwen через DashScope)."""
+    if model.startswith("qwen"):
+        if qwen_client is None:
+            raise RuntimeError(
+                "QWEN_API_KEY не задан в переменных окружения — невозможно использовать модель Qwen"
+            )
+        return qwen_client
+    return openai_client
+
+
 def attempt_inn_correction(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> tuple[str | None, bool]:
     """Пытается исправить невалидный ИНН: сначала retry-запросом к модели,
     затем (если не помогло) перебором спутываемых цифр.
@@ -438,7 +446,7 @@ def attempt_inn_correction(file_bytes: bytes, mime_type: str, field_name: str, w
         if model.startswith("GigaChat"):
             retried = retry_inn_gigachat(file_bytes, field_name, wrong_value, model)
         else:
-            retried = retry_inn_openai(file_bytes, mime_type, field_name, wrong_value, model)
+            retried = retry_inn_openai(file_bytes, mime_type, field_name, wrong_value, model, client=get_openai_compatible_client(model))
     except Exception as e:
         print(f"[inn_retry] ошибка повторного запроса: {e}", flush=True)
         retried = None
@@ -458,9 +466,12 @@ def attempt_inn_correction(file_bytes: bytes, mime_type: str, field_name: str, w
     return None, False
 
 
-def retry_name_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str) -> str | None:
-    """Повторно просит OpenAI перечитать конкретное поле ФИО по буквам.
+def retry_name_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_value: str, model: str, client: OpenAI = None) -> str | None:
+    """Повторно просит OpenAI-совместимую модель перечитать конкретное поле ФИО по буквам.
     Возвращает исправленное значение или None."""
+    if client is None:
+        client = openai_client
+
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64}"
 
@@ -475,7 +486,7 @@ def retry_name_openai(file_bytes: bytes, mime_type: str, field_name: str, wrong_
         '{"value": "<исправленное значение>"}.'
     )
 
-    response = openai_client.chat.completions.create(
+    response = client.chat.completions.create(
         model=model,
         messages=[{
             "role": "user",
@@ -553,7 +564,7 @@ def attempt_name_correction(file_bytes: bytes, mime_type: str, field_name: str, 
         if model.startswith("GigaChat"):
             retried = retry_name_gigachat(file_bytes, field_name, wrong_value, model)
         else:
-            retried = retry_name_openai(file_bytes, mime_type, field_name, wrong_value, model)
+            retried = retry_name_openai(file_bytes, mime_type, field_name, wrong_value, model, client=get_openai_compatible_client(model))
     except Exception as e:
         print(f"[name_retry] ошибка повторного запроса: {e}", flush=True)
         retried = None
@@ -564,6 +575,259 @@ def attempt_name_correction(file_bytes: bytes, mime_type: str, field_name: str, 
 
     print(f"[name_retry] не удалось уверенно исправить '{wrong_value}'", flush=True)
     return None, False
+
+
+def _openai_chat(model: str, messages: list, max_tokens: int = 1000) -> str:
+    """Универсальный вызов OpenAI-совместимого API (OpenAI / Qwen / GigaChat не поддерживает этот путь)."""
+    client = get_openai_compatible_client(model)
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=0,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def crop_image_strip(img_bytes: bytes, y_start: float, y_end: float) -> bytes:
+    """Вырезает горизонтальную полосу изображения (y_start, y_end — доли от 0 до 1)."""
+    from PIL import Image
+    import io
+    img = Image.open(io.BytesIO(img_bytes))
+    w, h = img.size
+    crop = img.crop((0, int(h * y_start), w, int(h * y_end)))
+    crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
+    buf = io.BytesIO()
+    crop.convert("RGB").save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
+def retry_empty_fields(file_bytes: bytes, mime_type: str, empty_fields: list, model: str) -> dict:
+    """Делает второй запрос к модели только за пустыми полями."""
+    if not empty_fields:
+        return {}
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
+    data_url = f"data:{mime_type};base64,{b64}"
+    field_list = "\n".join(f"- {f}" for f in empty_fields)
+    prompt = (
+        "Внимательно изучи документ и найди следующие поля, которые не удалось распознать с первого раза:\n"
+        f"{field_list}\n\n"
+        "ВАЖНО:\n"
+        "- Ищи смысловое соответствие: 'ФИО' = полное имя человека на документе, "
+        "'Номер ИНН' = строка цифр в рамке рядом со словом ИНН, "
+        "'Дата документа' = любая дата выдачи или постановки на учёт.\n"
+        "- Если поле есть на документе — оно ДОЛЖНО быть найдено. Не возвращай пустую строку "
+        "если информация видна на документе.\n"
+        "- ИНН: читай каждую клетку по отдельности и объединяй без пробелов.\n"
+        "- ФИО: ищи полное имя человека, обычно написано крупным шрифтом или подчёркнуто.\n\n"
+        "Ответь СТРОГО в формате JSON без markdown. "
+        "Ключи должны точно совпадать с названиями полей выше. "
+        "Если поле действительно не найдено — используй пустую строку."
+    )
+    try:
+        if model.startswith("GigaChat"):
+            from gigachat import GigaChat
+            from gigachat.models import Chat, Messages, MessagesRole
+            with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+                upload = giga.upload_file(("document.png", file_bytes, "image/png"))
+                payload = Chat(
+                    model=model,
+                    messages=[Messages(role=MessagesRole.USER, content=prompt, attachments=[upload.id_])],
+                    temperature=0, max_tokens=500,
+                )
+                raw = giga.chat(payload).choices[0].message.content.strip()
+        else:
+            raw = _openai_chat(model, [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]}], max_tokens=500)
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        return json.loads(raw)
+    except Exception as e:
+        print(f"[retry_empty] ошибка: {e}", flush=True)
+        return {}
+
+
+def extract_inn_from_crop(file_bytes: bytes, mime_type: str, model: str) -> str | None:
+    """Вырезает зону ИНН (50-80% высоты) и делает отдельный запрос для его распознавания."""
+    try:
+        crop_bytes = crop_image_strip(file_bytes, 0.45, 0.80)
+    except Exception as e:
+        print(f"[inn_crop] ошибка обрезки: {e}", flush=True)
+        return None
+
+    b64 = base64.b64encode(crop_bytes).decode("utf-8")
+    data_url = "data:image/jpeg;base64," + b64
+    prompt = (
+        "На этом фрагменте документа найди строку ИНН. "
+        "ИНН напечатан в отдельных клетках-ячейках. "
+        "Читай КАЖДУЮ цифру из каждой клетки слева направо и объединяй без пробелов. "
+        "ИНН физлица — ровно 12 цифр, юрлица — 10 цифр. "
+        "Не путай: 0 и О (буква), 1 и 7, 3 и 8. "
+        'Ответь СТРОГО в формате JSON без markdown: {"inn": "<только цифры>"}'
+    )
+    try:
+        if model.startswith("GigaChat"):
+            from gigachat import GigaChat
+            from gigachat.models import Chat, Messages, MessagesRole
+            with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+                upload = giga.upload_file(("crop.jpeg", crop_bytes, "image/jpeg"))
+                payload = Chat(
+                    model=model,
+                    messages=[Messages(role=MessagesRole.USER, content=prompt, attachments=[upload.id_])],
+                    temperature=0, max_tokens=100,
+                )
+                raw = giga.chat(payload).choices[0].message.content.strip()
+        else:
+            raw = _openai_chat(model, [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]}], max_tokens=100)
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        val = json.loads(raw).get("inn", "").strip()
+        if val and val.isdigit() and len(val) in (10, 12):
+            return val
+    except Exception as e:
+        print(f"[inn_crop] ошибка запроса: {e}", flush=True)
+    return None
+
+
+def recognize_balance(file_bytes: bytes, mime_type: str, model: str) -> dict:
+    """Распознавание бухгалтерского баланса: шапка + таблица нарезанная полосами."""
+    result = {"Вид документа": "", "ИНН": "", "Отчётная дата": "", "Период": "", "Организация": "", "tablitsa": []}
+
+    def ask_strip(y_start, y_end, prompt_text, max_tok=300):
+        crop = crop_image_strip(file_bytes, y_start, y_end)
+        b64 = base64.b64encode(crop).decode()
+        data_url = "data:image/jpeg;base64," + b64
+        if model.startswith("GigaChat"):
+            from gigachat import GigaChat
+            from gigachat.models import Chat, Messages, MessagesRole
+            with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+                upload = giga.upload_file(("crop.jpeg", crop, "image/jpeg"))
+                payload = Chat(model=model,
+                    messages=[Messages(role=MessagesRole.USER, content=prompt_text, attachments=[upload.id_])],
+                    temperature=0, max_tokens=max_tok)
+                return giga.chat(payload).choices[0].message.content.strip()
+        else:
+            return _openai_chat(model, [{"role": "user", "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]}], max_tokens=max_tok)
+
+    def clean_json(raw):
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        if not raw.endswith("}"):
+            ob = raw.count("[") - raw.count("]")
+            ob2 = raw.count("{") - raw.count("}")
+            raw = raw.rstrip(", \n\r") + "]" * ob + "}" * ob2
+        return raw
+
+    try:
+        raw = clean_json(ask_strip(0.0, 0.22,
+            "Это верхняя часть бухгалтерского документа. Извлеки только шапку. "
+            'Ответь СТРОГО JSON без markdown: {"vid_dokumenta":"...","inn":"...","otchetnaya_data":"...","period":"...","organizaciya":"..."} '
+            "ИНН = строго 10 цифр подряд без пробелов. "
+            "Отчётная дата = дата из заголовка в формате ДД.ММ.ГГГГ. "
+            "Период = текстовое описание (например: 9 месяцев 2025 г.)."))
+        header = json.loads(raw)
+        result["Вид документа"] = header.get("vid_dokumenta", "")
+        result["ИНН"] = header.get("inn", "")
+        result["Отчётная дата"] = header.get("otchetnaya_data", "")
+        result["Период"] = header.get("period", "")
+        result["Организация"] = header.get("organizaciya", "")
+    except Exception as e:
+        print(f"[balance] ошибка шапки: {e}", flush=True)
+
+    table_prompt = (
+        "Это фрагмент таблицы из бухгалтерского баланса. Извлеки ВСЕ строки таблицы которые видишь. "
+        'Ответь СТРОГО JSON без markdown: {"rows": [{"kod": 1110, "nazvanie": "...", "period1": 0, "period2": 0, "period3": 0}]} '
+        "Правила: прочерк = null, отрицательные числа в скобках = минус, числа без пробелов."
+    )
+    for y_start, y_end, label in [(0.20, 0.50, "1-я треть"), (0.48, 0.75, "2-я треть"), (0.73, 1.00, "3-я треть")]:
+        try:
+            raw = clean_json(ask_strip(y_start, y_end, table_prompt, max_tok=2000))
+            rows = json.loads(raw).get("rows", [])
+            result["tablitsa"].extend(rows)
+            print(f"[balance] {label}: {len(rows)} строк", flush=True)
+        except Exception as e:
+            print(f"[balance] ошибка {label}: {e}", flush=True)
+
+    seen, unique = set(), []
+    for row in result["tablitsa"]:
+        kod = row.get("kod")
+        if kod not in seen:
+            seen.add(kod)
+            unique.append(row)
+    result["tablitsa"] = unique
+    return result
+
+
+def recognize_leasing_doc(file_bytes: bytes, mime_type: str, model: str) -> dict:
+    """Специализированное распознавание лизинговых документов — вырезаем только нужные зоны."""
+    result = {"Тип документа": "", "Дата документа": "", "Номер договора": ""}
+
+    def ask_zone(y_start, y_end, prompt_text):
+        crop = crop_image_strip(file_bytes, y_start, y_end)
+        b64 = base64.b64encode(crop).decode()
+        data_url = "data:image/jpeg;base64," + b64
+        if model.startswith("GigaChat"):
+            from gigachat import GigaChat
+            from gigachat.models import Chat, Messages, MessagesRole
+            with GigaChat(credentials=GIGACHAT_CREDENTIALS, verify_ssl_certs=False) as giga:
+                upload = giga.upload_file(("crop.jpeg", crop, "image/jpeg"))
+                payload = Chat(model=model,
+                    messages=[Messages(role=MessagesRole.USER, content=prompt_text, attachments=[upload.id_])],
+                    temperature=0, max_tokens=200)
+                raw = giga.chat(payload).choices[0].message.content.strip()
+        else:
+            raw = _openai_chat(model, [{"role": "user", "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]}], max_tokens=200)
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        return json.loads(raw)
+
+    try:
+        result["Тип документа"] = ask_zone(0.0, 0.18,
+            "Это верхняя часть документа. Найди заголовок — название документа. "
+            'Ответь СТРОГО JSON без markdown: {"tip": "полное название документа как написано в заголовке"}'
+        ).get("tip", "")
+    except Exception as e:
+        print(f"[leasing] ошибка типа: {e}", flush=True)
+    try:
+        result["Дата документа"] = ask_zone(0.05, 0.25,
+            "Найди дату документа на этом фрагменте. "
+            'Ответь СТРОГО JSON без markdown: {"data": "дата в формате ДД месяц ГГГГ г. или ДД.ММ.ГГГГ"}'
+        ).get("data", "")
+    except Exception as e:
+        print(f"[leasing] ошибка даты: {e}", flush=True)
+    try:
+        result["Номер договора"] = ask_zone(0.10, 0.45,
+            "Найди номер договора лизинга или купли-продажи на этом фрагменте. "
+            "Номер обычно стоит после слов '№', 'договор №', 'по договору', 'лизинга №'. "
+            'Ответь СТРОГО JSON без markdown: {"nomer": "номер договора"}'
+        ).get("nomer", "")
+    except Exception as e:
+        print(f"[leasing] ошибка номера: {e}", flush=True)
+
+    return result
 
 
 def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
@@ -581,11 +845,66 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
             mime_type = "image/png"
         else:
             mime_type = guess_mime_type(filename)
+            # Сжимаем изображение если оно слишком большое
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(file_bytes))
+                w, h = img.size
+                if max(w, h) > 1200:
+                    scale = 1200 / max(w, h)
+                    img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=75)
+                file_bytes = buf.getvalue()
+                mime_type = "image/jpeg"
+            except Exception:
+                pass
 
         print(f"[doc {doc_id}] отправка в модель {model}...", flush=True)
-        result = recognize_document(file_bytes, mime_type, fields, model)
-        confidence = result.pop("_confidence", 50)
-        print(f"[doc {doc_id}] confidence={confidence}, result={result}", flush=True)
+
+        # Определяем тип шаблона
+        is_balance = any("баланс" in f.lower() or "таблиц" in f.lower() or "показател" in f.lower() for f in fields)
+        is_leasing = any(f.lower() in ["тип документа", "номер договора"] for f in fields)
+
+        if is_balance:
+            print(f"[doc {doc_id}] обнаружен шаблон баланса, нарезаем полосами", flush=True)
+            balance_data = recognize_balance(file_bytes, mime_type, model)
+            tablitsa = balance_data.pop("tablitsa", [])
+            result = balance_data
+            result["_tablitsa"] = tablitsa
+            confidence = 90 if tablitsa else 50
+        elif is_leasing:
+            print(f"[doc {doc_id}] обнаружен шаблон лизинга, вырезаем зоны", flush=True)
+            result = recognize_leasing_doc(file_bytes, mime_type, model)
+            confidence = 85
+        else:
+            result = recognize_document(file_bytes, mime_type, fields, model)
+            confidence = result.pop("_confidence", 50)
+
+        print(f"[doc {doc_id}] confidence={confidence}", flush=True)
+
+        # Второй проход за пустыми полями (только для обычных документов)
+        empty_fields = [] if (is_balance or is_leasing) else [f for f in result.keys() if not result.get(f) and f != "_tablitsa"]
+        if empty_fields:
+            print(f"[doc {doc_id}] пустые поля: {empty_fields}, запускаем второй проход...", flush=True)
+            retry_result = retry_empty_fields(file_bytes, mime_type, empty_fields, model)
+            for field in empty_fields:
+                val = retry_result.get(field, "")
+                if val and str(val).strip():
+                    result[field] = val
+                    print(f"[doc {doc_id}] поле '{field}' заполнено: {val}", flush=True)
+
+        # ИНН crop-распознавание если поле всё ещё пустое
+        if not is_balance and not is_leasing:
+            for field in list(result.keys()):
+                value = result[field]
+                if "инн" in field.lower() and (not value or not str(value).strip()):
+                    print(f"[doc {doc_id}] ИНН пустой, пробуем crop-распознавание...", flush=True)
+                    inn_from_crop = extract_inn_from_crop(file_bytes, mime_type, model)
+                    if inn_from_crop:
+                        result[field] = inn_from_crop
+                        print(f"[doc {doc_id}] ИНН из crop: {inn_from_crop}", flush=True)
 
         # Проверка контрольной суммы ИНН с попыткой самокоррекции
         for field in list(result.keys()):
