@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabaseClient'
-import { Plus, FileText, X } from 'lucide-react'
+import { Plus, FileText, X, Trash2 } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +34,27 @@ export default function TemplatesPage() {
   useEffect(() => {
     loadTemplates()
   }, [])
+
+  const handleDeleteTemplate = async (e, templateId) => {
+    e.stopPropagation()
+    if (!confirm('Удалить этот шаблон и все его примеры?')) return
+    try {
+      // Удаляем файлы эталонов из Storage
+      const { data: examples } = await supabase
+        .from('template_examples')
+        .select('file_path')
+        .eq('template_id', templateId)
+      if (examples?.length) {
+        await supabase.storage.from('template-examples').remove(examples.map(e => e.file_path))
+      }
+      // CASCADE удалит и template_examples
+      const { error } = await supabase.from('document_templates').delete().eq('id', templateId)
+      if (error) throw error
+      await loadTemplates()
+    } catch (err) {
+      alert('Ошибка при удалении: ' + err.message)
+    }
+  }
 
   const handleCreate = async () => {
     if (!newName.trim()) {
@@ -111,7 +132,13 @@ export default function TemplatesPage() {
                 }}>
                   <FileText size={17} color="#1C6B41" />
                 </div>
-                <span style={{ fontSize: 14.5, fontWeight: 700, color: '#16201A' }}>{t.name}</span>
+                <span style={{ fontSize: 14.5, fontWeight: 700, color: '#16201A', flex: 1 }}>{t.name}</span>
+                <Trash2
+                  size={15}
+                  color="#C0392B"
+                  style={{ cursor: 'pointer', flexShrink: 0 }}
+                  onClick={(e) => handleDeleteTemplate(e, t.id)}
+                />
               </div>
               <div style={{ fontSize: 12.5, color: '#9CA6A0', marginBottom: 4 }}>
                 {(t.template_examples?.[0]?.count ?? 0)} эталона · {(t.fields?.length ?? 0)} полей
