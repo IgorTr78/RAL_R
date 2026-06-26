@@ -900,8 +900,12 @@ def recognize_leasing_doc(file_bytes: bytes, mime_type: str, model: str) -> dict
 
     try:
         result["Тип документа"] = ask_zone(0.0, 0.18,
-            "Это верхняя часть документа. Найди заголовок — название документа. "
-            'Ответь СТРОГО JSON без markdown: {"tip": "полное название документа как написано в заголовке"}'
+            "Это верхняя часть документа. Найди полное официальное название документа — "
+            "оно обычно написано крупным шрифтом по центру и может занимать несколько строк. "
+            "Возьми ВСЕ строки заголовка целиком, включая подзаголовки. "
+            "Например: 'Акт приема-передачи Предмета лизинга по договору финансовой аренды (лизинга)'. "
+            "НЕ включай дату и номер договора — только само название. "
+            'Ответь СТРОГО JSON без markdown: {"tip": "полное название документа"}'
         ).get("tip", "")
     except Exception as e:
         print(f"[leasing] ошибка типа: {e}", flush=True)
@@ -991,10 +995,11 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini", t
         elif is_leasing:
             print(f"[doc {doc_id}] обнаружен шаблон лизинга, вырезаем зоны", flush=True)
             result = recognize_leasing_doc(file_bytes, mime_type, model)
-            # Если выбран шаблон — подставляем его название вместо распознанного типа
-            if template_name and "Тип документа" in result:
-                result["Тип документа"] = template_name
-                print(f"[doc {doc_id}] Тип документа подставлен из шаблона: {template_name}", flush=True)
+            # Тип документа — полное название из заголовка (уже распознано моделью)
+            # Вид документа — краткое название шаблона, подставляем автоматически
+            if template_name:
+                result["Вид документа"] = template_name
+                print(f"[doc {doc_id}] Вид документа подставлен из шаблона: {template_name}", flush=True)
             confidence = 85
         else:
             result = recognize_document(file_bytes, mime_type, fields, model)
