@@ -19,6 +19,7 @@ export default function TemplateDetailPage() {
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef()
 
+  // Текстовые инструкции для промпта по этому типу документа
   const [instructions, setInstructions] = useState('')
   const [savingInstructions, setSavingInstructions] = useState(false)
 
@@ -69,6 +70,7 @@ export default function TemplateDetailPage() {
         .upload(safeName, file)
       if (upErr) throw upErr
 
+      // создаём пустой объект значений полей — заполнить можно сразу после
       const emptyValues = {}
       ;(template?.fields || []).forEach(f => { emptyValues[f] = '' })
 
@@ -140,6 +142,20 @@ export default function TemplateDetailPage() {
     }
   }
 
+  const handleDeleteTemplate = async () => {
+    if (!confirm('Удалить этот шаблон и все его примеры?')) return
+    try {
+      if (examples.length > 0) {
+        await supabase.storage.from(EXAMPLES_BUCKET).remove(examples.map(e => e.file_path))
+      }
+      const { error } = await supabase.from('document_templates').delete().eq('id', templateId)
+      if (error) throw error
+      router.push('/templates')
+    } catch (err) {
+      alert('Ошибка при удалении: ' + err.message)
+    }
+  }
+
   const getPublicUrl = (path) => {
     const { data } = supabase.storage.from(EXAMPLES_BUCKET).getPublicUrl(path)
     return data?.publicUrl
@@ -163,15 +179,28 @@ export default function TemplateDetailPage() {
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '28px 24px' }}>
-      <button
-        onClick={() => router.push('/templates')}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18,
-          background: 'none', border: 'none', color: '#9CA6A0', fontSize: 13, cursor: 'pointer', padding: 0,
-        }}
-      >
-        <ArrowLeft size={15} /> Все шаблоны
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+        <button
+          onClick={() => router.push('/templates')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'none', border: 'none', color: '#9CA6A0', fontSize: 13, cursor: 'pointer', padding: 0,
+          }}
+        >
+          <ArrowLeft size={15} /> Все шаблоны
+        </button>
+        <button
+          onClick={handleDeleteTemplate}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            fontSize: 13, color: '#C0392B', cursor: 'pointer',
+            border: '1px solid #FCCACA', borderRadius: 10, padding: '7px 14px',
+            background: '#FFF5F5', fontWeight: 600,
+          }}
+        >
+          <Trash2 size={14} /> Удалить шаблон
+        </button>
+      </div>
 
       <div style={{ marginBottom: 24 }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>{template.name}</div>
