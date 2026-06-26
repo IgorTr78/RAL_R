@@ -15,10 +15,13 @@ export default function UploadPage() {
 
   const ALLOWED_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp']
 
+  // Проверяет, выглядит ли имя файла "битым" (нечитаемые символы из-за проблем
+  // с кодировкой кириллицы в ZIP-архивах с Windows/macOS)
   const isGarbledName = (name) => {
     return /\uFFFD|[\x00-\x08\x0E-\x1F]/.test(name)
   }
 
+  // Распаковывает ZIP-файл в массив { name, blob } для поддерживаемых форматов
   const extractZip = async (zipFile) => {
     const zip = await JSZip.loadAsync(zipFile)
     const result = []
@@ -43,7 +46,7 @@ export default function UploadPage() {
     return result
   }
 
-  const handleRecognize = async (fields, model) => {
+  const handleRecognize = async (fields, model, templateName) => {
     if (files.length === 0) {
       alert('Сначала выберите файл для загрузки')
       return
@@ -83,6 +86,7 @@ export default function UploadPage() {
           status: 'pending',
           fields: fields,
           model: model || 'gpt-4o-mini',
+          template_name: templateName || null,
         })
         .select()
         .single()
