@@ -1,169 +1,157 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import TaskList from '../components/TaskList'
-import { supabase } from '../lib/supabaseClient'
+import UploadZone from '../../components/UploadZone'
+import ParametersForm from '../../components/ParametersForm'
+import { supabase } from '../../lib/supabaseClient'
+import JSZip from 'jszip'
 
 export const dynamic = 'force-dynamic'
 
-export default function HomePage() {
+export default function UploadPage() {
   const router = useRouter()
-  const [tasks, setTasks] = useState([])
-  const [loadingTasks, setLoadingTasks] = useState(true)
-  const [stats, setStats] = useState({ total: 0, ok: 0, warning: 0, error: 0 })
+  const [files, setFiles] = useState([])
+  const [loading, setLoading] = useState(false)
 
-  const loadStats = async () => {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('status')
+  const ALLOWED_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp']
 
-    if (error) {
-      console.error('Ошибка загрузки статистики:', error)
+  // Проверяет, выглядит ли имя файла "битым" (нечитаемые символы из-за проблем
+  // с кодировкой кириллицы в ZIP-архивах с Windows/macOS)
+  const isGarbledName = (name) => {
+    return /\uFFFD|[\x00-\x08\x0E-\x1F]/.test(name)
+  }
+
+  // Распаковывает ZIP-файл в массив { name, blob } для поддерживаемых форматов
+  const extractZip = async (zipFile) => {
+    const zip = await JSZip.loadAsync(zipFile)
+    const result = []
+    let counter = 1
+
+    for (const [path, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue
+      let name = path.split('/').pop()
+      const ext = name.split('.').pop().toLowerCase()
+      if (!ALLOWED_EXTS.includes(ext)) continue
+      if (name.startsWith('.') || path.includes('__MACOSX')) continue
+
+      if (isGarbledName(name)) {
+        name = `документ_${counter}.${ext}`
+      }
+      counter++
+
+      const blob = await entry.async('blob')
+      result.push({ name, blob })
+    }
+
+    return result
+  }
+
+  const handleRecognize = async (fields, model, templateName) => {
+    if (files.length === 0) {
+      alert('Сначала выберите файл для загрузки')
       return
     }
+    setLoading(true)
 
-    setStats({
-      total: data.length,
-      ok: data.filter(d => d.status === 'ok').length,
-      warning: data.filter(d => d.status === 'warning').length,
-      error: data.filter(d => d.status === 'error').length,
-    })
-  }
-
-  const loadTasks = async (silent = false) => {
-    if (!silent) setLoadingTasks(true)
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(8)
-
-    let mapped = []
-    if (error) {
-      console.error('Ошибка загрузки задач:', error)
-    } else {
-      mapped = data.map(t => ({
-        id: t.id,
-        filename: t.filename,
-        size: t.file_size ? (t.file_size / 1024).toFixed(0) + ' КБ' : '—',
-        created_at: new Date(t.created_at).toLocaleDateString('ru-RU'),
-        doc_count: t.doc_count,
-        status: t.status,
-      }))
-      setTasks(mapped)
-    }
-    if (!silent) setLoadingTasks(false)
-    return mapped
-  }
-
-  useEffect(() => {
-    let cancelled = false
-
-    const tick = async () => {
-      await loadStats()
-      const mapped = await loadTasks(true)
-      setLoadingTasks(false)
-
-      const hasActive = mapped.some(t => t.status === 'pending' || t.status === 'processing')
-      if (!cancelled && hasActive) {
-        setTimeout(tick, 5000)
-      }
-    }
-
-    tick()
-    return () => { cancelled = true }
-  }, [])
-
-  const handleDelete = async (taskId) => {
     try {
-      const { data: docs } = await supabase
-        .from('documents')
-        .select('file_path')
-        .eq('task_id', taskId)
+      const inputFile = files[0]
+      const inputExt = inputFile.name.split('.').pop().toLowerCase()
 
-      if (docs && docs.length > 0) {
-        const paths = docs.map(d => d.file_path)
-        await supabase.storage.from('documents').remove(paths)
+      let documents = []
+      let taskFilename = inputFile.name
+      let taskFileSize = inputFile.size
+
+      if (inputExt === 'zip') {
+        const extracted = await extractZip(inputFile)
+        if (extracted.length === 0) {
+          throw new Error('В архиве не найдено поддерживаемых файлов (PDF, JPG, PNG, TIFF)')
+        }
+        documents = extracted.map(f => ({
+          file: f.blob,
+          name: f.name,
+          size: f.blob.size,
+        }))
+      } else if (inputExt === 'rar') {
+        throw new Error('Формат RAR пока не поддерживается. Используйте ZIP или загрузите файлы по одному.')
+      } else {
+        documents = [{ file: inputFile, name: inputFile.name, size: inputFile.size }]
       }
 
-      const { error } = await supabase.from('tasks').delete().eq('id', taskId)
-      if (error) throw error
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .insert({
+          filename: taskFilename,
+          file_size: taskFileSize,
+          doc_count: documents.length,
+          status: 'pending',
+          fields: fields,
+          model: model || 'gpt-4o-mini',
+          template_name: templateName || null,
+        })
+        .select()
+        .single()
 
-      await loadTasks()
-      await loadStats()
+      if (taskError) throw taskError
+
+      for (const doc of documents) {
+        const ext = doc.name.split('.').pop()
+        const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(safeName, doc.file)
+
+        if (uploadError) throw uploadError
+
+        const { error: docError } = await supabase
+          .from('documents')
+          .insert({
+            task_id: taskData.id,
+            filename: doc.name,
+            file_path: safeName,
+            file_size: doc.size,
+            status: 'pending',
+          })
+
+        if (docError) throw docError
+      }
+
+      setFiles([])
+      router.push('/')
     } catch (err) {
-      console.error('Ошибка удаления:', err)
-      alert('Ошибка при удалении: ' + err.message)
+      console.error('[handleRecognize] Ошибка:', err)
+      alert('Ошибка при загрузке: ' + err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div style={{ maxWidth: 920, margin: '0 auto', padding: '28px 24px' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 28,
-      }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>Дашборд</div>
-          <div style={{ fontSize: 13, color: '#9CA6A0', fontWeight: 500, marginTop: 2 }}>Обзор системы распознавания</div>
-        </div>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          fontSize: 12, fontWeight: 600, color: '#1C6B41',
-          background: '#ECF6EF', padding: '7px 14px', borderRadius: 999,
-        }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1C6B41', display: 'inline-block' }} />
-          Система активна
-        </div>
+    <div style={{ maxWidth: 760, margin: '0 auto', padding: '28px 24px' }}>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: '#16201A', letterSpacing: '-0.02em' }}>Загрузка</div>
+        <div style={{ fontSize: 13, color: '#9CA6A0', fontWeight: 500, marginTop: 2 }}>Загрузите документ или ZIP-архив для распознавания</div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 32 }}>
-        {[
-          { label: 'Всего документов', value: stats.total, color: '#16201A' },
-          { label: 'Распознано успешно', value: stats.ok, color: '#1C6B41' },
-          { label: 'Требуют проверки', value: stats.warning, color: '#92400E' },
-          { label: 'Ошибки', value: stats.error, color: '#C0392B' },
-        ].map(s => (
-          <div key={s.label} style={{
-            background: 'white', borderRadius: 18,
-            padding: '20px 22px',
-            boxShadow: '0 1px 2px rgba(22,32,26,0.04), 0 0 0 1px rgba(22,32,26,0.04)',
-          }}>
-            <div style={{ fontSize: 12.5, color: '#9CA6A0', marginBottom: 10, fontWeight: 600 }}>{s.label}</div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: s.color, lineHeight: 1, letterSpacing: '-0.03em' }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
+      <p style={{
+        fontSize: 11, fontWeight: 600, color: '#9CA6A0',
+        textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14,
+      }}>
+        Загрузка документов
+      </p>
+
+      <UploadZone onFilesSelected={setFiles} />
 
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 14,
+        display: 'flex', alignItems: 'center', gap: 12,
+        margin: '8px 0 20px', color: '#C4CCC8', fontSize: 12,
       }}>
-        <p style={{
-          fontSize: 11, fontWeight: 600, color: '#9CA6A0',
-          textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0,
-        }}>
-          Последние загрузки
-        </p>
-        <button
-          onClick={() => router.push('/upload')}
-          style={{
-            fontSize: 13, fontWeight: 600, color: 'white',
-            background: '#16201A', border: 'none', borderRadius: 9,
-            padding: '8px 16px', cursor: 'pointer',
-          }}
-        >
-          + Новая загрузка
-        </button>
+        <div style={{ flex: 1, height: 0.5, background: '#E5E9E6' }} />
+        параметры распознавания
+        <div style={{ flex: 1, height: 0.5, background: '#E5E9E6' }} />
       </div>
 
-      {loadingTasks ? (
-        <div style={{ padding: 24, textAlign: 'center', color: '#9CA6A0', fontSize: 14 }}>
-          Загрузка...
-        </div>
-      ) : (
-        <TaskList tasks={tasks} onRefresh={loadTasks} onDelete={handleDelete} />
-      )}
+      <ParametersForm onSubmit={handleRecognize} loading={loading} files={files} />
     </div>
   )
 }
