@@ -907,7 +907,12 @@ def recognize_leasing_doc(file_bytes: bytes, mime_type: str, model: str) -> dict
         print(f"[leasing] ошибка типа: {e}", flush=True)
     try:
         result["Дата документа"] = ask_zone(0.05, 0.25,
-            "Найди дату документа на этом фрагменте. "
+            "Найди дату подписания документа. "
+            "ВАЖНО: в лизинговых актах есть ДВЕ даты — "
+            "одна в заголовке (дата договора, например '19 мая 2026 г. № 3826528') "
+            "и другая — дата самого акта, обычно стоит ОТДЕЛЬНО в правом верхнем углу "
+            "или под заголовком (например: '\"27\" мая 2026г.' или '27 мая 2026 г.'). "
+            "Тебе нужна именно вторая дата — дата подписания акта, которая стоит отдельно. "
             'Ответь СТРОГО JSON без markdown: {"data": "дата в формате ДД месяц ГГГГ г. или ДД.ММ.ГГГГ"}'
         ).get("data", "")
     except Exception as e:
@@ -924,7 +929,7 @@ def recognize_leasing_doc(file_bytes: bytes, mime_type: str, model: str) -> dict
     return result
 
 
-def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
+def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini", template_name: str = None):
     doc_id = doc["id"]
     file_path = doc["file_path"]
     filename = doc["filename"]
@@ -986,6 +991,10 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
         elif is_leasing:
             print(f"[doc {doc_id}] обнаружен шаблон лизинга, вырезаем зоны", flush=True)
             result = recognize_leasing_doc(file_bytes, mime_type, model)
+            # Если выбран шаблон — подставляем его название вместо распознанного типа
+            if template_name and "Тип документа" in result:
+                result["Тип документа"] = template_name
+                print(f"[doc {doc_id}] Тип документа подставлен из шаблона: {template_name}", flush=True)
             confidence = 85
         else:
             result = recognize_document(file_bytes, mime_type, fields, model)
@@ -1092,6 +1101,7 @@ def process_pending_tasks():
         task_id = task["id"]
         fields = task.get("fields") or []
         model = task.get("model") or "gpt-4o-mini"
+        template_name = task.get("template_name") or None
 
         # Помечаем задачу как "в обработке"
         supabase.table("tasks").update({"status": "processing"}).eq("id", task_id).execute()
@@ -1105,7 +1115,7 @@ def process_pending_tasks():
         pending_docs = [d for d in documents if d["status"] == "pending"]
         for doc in pending_docs:
             doc_model = doc.get("model") or model
-            process_document(doc, fields, doc_model)
+            process_document(doc, fields, doc_model, template_name=template_name)
 
         # Пересчитываем итоговый статус задачи по ВСЕМ документам
         docs_resp = supabase.table("documents").select("status").eq("task_id", task_id).execute()
