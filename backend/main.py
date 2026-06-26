@@ -577,6 +577,100 @@ def attempt_name_correction(file_bytes: bytes, mime_type: str, field_name: str, 
     return None, False
 
 
+def extract_balance_from_pdf(pdf_bytes: bytes) -> dict:
+    """Извлекает данные баланса из текстового слоя PDF через PyMuPDF (без запроса к модели).
+    Работает только для машиночитаемых PDF — не для сканов."""
+    import re
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+    result = {
+        "Вид документа": "", "ИНН": "", "Отчётная дата": "",
+        "Период": "", "Организация": "", "tablitsa": []
+    }
+
+    full_text = ""
+    for page in doc:
+        full_text += page.get_text() + "\n"
+
+    lines_text = [l.strip() for l in full_text.splitlines() if l.strip()]
+
+    for i, line in enumerate(lines_text):
+        if "БУХГАЛТЕРСКИЙ БАЛАНС" in line.upper() and not result["Вид документа"]:
+            result["Вид документа"] = "Бухгалтерский баланс"
+        if ("ОТЧЁТ О ФИНАНСОВЫХ" in line.upper() or "ОТЧЕТ О ФИНАНСОВЫХ" in line.upper()) and not result["Вид документа"]:
+            result["Вид документа"] = "Отчёт о финансовых результатах"
+
+        if "ИНН" in line and not result["ИНН"]:
+            inn_m = re.search(r"\b(\d{10})\b", line)
+            if not inn_m and i + 1 < len(lines_text):
+                inn_m = re.search(r"\b(\d{10})\b", lines_text[i + 1])
+            if inn_m:
+                result["ИНН"] = inn_m.group(1)
+
+        if not result["Отчётная дата"]:
+            dm = re.search(r"(\d{1,2}\.\d{2}\.\d{4})", line)
+            if dm:
+                result["Отчётная дата"] = dm.group(1)
+
+        if not result["Период"]:
+            pm = re.search(r"(\d+\s+(?:месяц|квартал|полугоди)\w*\s+\d{4})", line, re.IGNORECASE)
+            if pm:
+                result["Период"] = pm.group(1)
+
+        if not result["Организация"]:
+            om = re.search(r"((?:ООО|АО|ПАО|ЗАО|ИП)[\s\w\"\'–-]+)", line)
+            if om and len(om.group(1)) < 80:
+                result["Организация"] = om.group(1).strip()
+
+    row_re = re.compile(r"^(.+?)\s{2,}(\d{4})\s+((?:-?\d[\d\s]*\s*)+)$")
+    short_re = re.compile(r"^(.+?)\s{2,}(\d{4})\s*$")
+
+    i = 0
+    while i < len(lines_text):
+        line = lines_text[i]
+        m = row_re.match(line)
+        if m:
+            nums_raw = re.findall(r"-?\d[\d\s]*", m.group(3))
+            nums = []
+            for n in nums_raw[:3]:
+                try:
+                    nums.append(int(n.replace(" ", "")))
+                except Exception:
+                    nums.append(None)
+            result["tablitsa"].append({
+                "kod": int(m.group(2)), "nazvanie": m.group(1).strip(),
+                "period1": nums[0] if len(nums) > 0 else None,
+                "period2": nums[1] if len(nums) > 1 else None,
+                "period3": nums[2] if len(nums) > 2 else None,
+            })
+            i += 1
+            continue
+
+        m2 = short_re.match(line)
+        if m2 and i + 1 < len(lines_text):
+            next_line = lines_text[i + 1]
+            nums_raw = re.findall(r"-?\d[\d\s]*", next_line)
+            nums = []
+            for n in nums_raw[:3]:
+                try:
+                    nums.append(int(n.replace(" ", "")))
+                except Exception:
+                    nums.append(None)
+            if nums:
+                result["tablitsa"].append({
+                    "kod": int(m2.group(2)), "nazvanie": m2.group(1).strip(),
+                    "period1": nums[0] if len(nums) > 0 else None,
+                    "period2": nums[1] if len(nums) > 1 else None,
+                    "period3": nums[2] if len(nums) > 2 else None,
+                })
+                i += 2
+                continue
+        i += 1
+
+    print(f"[pdf_parse] строк таблицы: {len(result['tablitsa'])}", flush=True)
+    return result
+
+
 def _openai_chat(model: str, messages: list, max_tokens: int = 1000) -> str:
     """Универсальный вызов OpenAI-совместимого API (OpenAI / Qwen / GigaChat не поддерживает этот путь)."""
     client = get_openai_compatible_client(model)
@@ -869,11 +963,26 @@ def process_document(doc: dict, fields: list[str], model: str = "gpt-4o-mini"):
 
         if is_balance:
             print(f"[doc {doc_id}] обнаружен шаблон баланса, нарезаем полосами", flush=True)
-            balance_data = recognize_balance(file_bytes, mime_type, model)
-            tablitsa = balance_data.pop("tablitsa", [])
-            result = balance_data
-            result["_tablitsa"] = tablitsa
-            confidence = 90 if tablitsa else 50
+            # Для PDF-балансов сначала пробуем быстрый текстовый парсинг без vision
+            pdf_result = None
+            if filename.lower().endswith(".pdf"):
+                try:
+                    raw_pdf = supabase.storage.from_(STORAGE_BUCKET).download(file_path)
+                    pdf_result = extract_balance_from_pdf(raw_pdf)
+                    print(f"[doc {doc_id}] PDF-парсинг баланса: {len(pdf_result.get('tablitsa', []))} строк", flush=True)
+                except Exception as e:
+                    print(f"[doc {doc_id}] PDF-парсинг не удался: {e}", flush=True)
+            if pdf_result and pdf_result.get("tablitsa"):
+                tablitsa = pdf_result.pop("tablitsa", [])
+                result = pdf_result
+                result["_tablitsa"] = tablitsa
+                confidence = 90
+            else:
+                balance_data = recognize_balance(file_bytes, mime_type, model)
+                tablitsa = balance_data.pop("tablitsa", [])
+                result = balance_data
+                result["_tablitsa"] = tablitsa
+                confidence = 90 if tablitsa else 50
         elif is_leasing:
             print(f"[doc {doc_id}] обнаружен шаблон лизинга, вырезаем зоны", flush=True)
             result = recognize_leasing_doc(file_bytes, mime_type, model)
